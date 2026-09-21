@@ -24,14 +24,27 @@ export const loginSchema = z.object({
     login: z.string({ message: "Login é obrigatório." })
         .trim()
         .min(3, { message: "Login deve ter pelo menos 3 caracteres." })
-        .max(100, { message: "Login deve ter no máximo 100 caracteres." }),
+        .max(100, { message: "Login deve ter no máximo 100 caracteres." })
+        .optional(),
+    email: z.string({ message: "Email é obrigatório." })
+        .trim()
+        .email({ message: "Email inválido." })
+        .max(200, { message: "Email deve ter no máximo 200 caracteres." })
+        .optional(),
     senha: z.string({ message: "Senha é obrigatória." })
         .trim()
         .min(6, { message: "Senha deve ter pelo menos 6 caracteres." })
         .max(255, { message: "Senha deve ter no máximo 255 caracteres." }),
+}).refine((value) => Boolean(value.login || value.email), {
+    message: "Informe login ou email para autenticar.",
+    path: ["login"],
 });
 
-export type LoginDTO = z.infer<typeof loginSchema>;
+export type LoginDTO = z.infer<typeof loginSchema> & {
+    login?: string;
+    email?: string;
+    senha: string;
+};
 
 /**
  * Schema de refresh. O `refresh_token` é opcional no BODY pois pode ser

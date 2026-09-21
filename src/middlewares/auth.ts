@@ -28,11 +28,11 @@ import { banco } from "../database/connection.js";
  *   - `exp`           : timestamp UNIX em segundos da expiração do access token.
  */
 export interface TokenPayload {
-    id: number;
+    id: string;
     userLogin: string;
     classificacao: string;
     jti: string;
-    exp: number;
+    exp?: number;
 }
 
 /**
@@ -206,7 +206,7 @@ export async function autenticarToken(
 
         // Anexa o usuário autenticado ao request.
         req.user = {
-            id: Number(decoded.id),
+            id: String(decoded.id),
             userLogin: String(decoded.userLogin),
             classificacao: decoded.classificacao,
             jti,

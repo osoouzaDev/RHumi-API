@@ -84,7 +84,7 @@ export const usuariosService = {
      * @returns    Instância de `Usuario` garantidamente não-nula.
      * @throws     AppError(404) se o id não corresponder a nenhum registro.
      */
-    async buscarPorId(id: number): Promise<Usuario> {
+    async buscarPorId(id: string): Promise<Usuario> {
         const usuario = await usuariosRepositorio.buscarPorId(id);
         if (!usuario) {
             throw new AppError("Usuário não encontrado.", 404);
@@ -168,7 +168,7 @@ export const usuariosService = {
      * @param dto - Campos parciais a atualizar (sem login, sem senha via DTO).
      * @returns    Usuário após a persistência dos novos dados.
      */
-    async atualizar(id: number, dto: UpdateUserDTO): Promise<Usuario> {
+    async atualizar(id: string, dto: UpdateUserDTO): Promise<Usuario> {
         // Pré-condição: usuário existe (Fail Fast)
         await this.buscarPorId(id);
 
@@ -226,7 +226,7 @@ export const usuariosService = {
      *                       existe e hash não puder ser recuperado.
      */
     async atualizarSenha(
-        id: number,
+        id: string,
         dto: UpdateUserPasswordDTO,
         senhaHashAtual?: string
     ): Promise<void> {
@@ -279,7 +279,7 @@ export const usuariosService = {
      * @param id - Chave primária do usuário a ser removido.
      * @throws     AppError(404) se não encontrado; AppError(503) enquanto stub.
      */
-    async deletar(id: number): Promise<void> {
+    async deletar(id: string): Promise<void> {
         // Pré-condição: usuário existe
         await this.buscarPorId(id);
         await usuariosRepositorio.deletar(id);

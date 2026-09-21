@@ -46,10 +46,12 @@ export function validate(schemas: ValidateSchemas): RequestHandler {
                 req.body = schemas.body.parse(req.body);
             }
             if (schemas.query) {
-                req.query = schemas.query.parse(req.query) as unknown as typeof req.query;
+                const parsedQuery = schemas.query.parse(req.query);
+                Object.assign(req.query, parsedQuery);
             }
             if (schemas.params) {
-                req.params = schemas.params.parse(req.params) as unknown as typeof req.params;
+                const parsedParams = schemas.params.parse(req.params);
+                Object.assign(req.params, parsedParams);
             }
             next();
         } catch (error) {
@@ -63,6 +65,9 @@ export function validate(schemas: ValidateSchemas): RequestHandler {
                 fail(res, "Dados de entrada inválidos.", 422, { erros: mensagens });
                 return;
             }
+
+            console.error("[validate] erro inesperado:", error);
+
             // Qualquer outro erro inesperado no meio do parse → 500.
             next(new AppError("Erro interno na validação.", 500));
         }

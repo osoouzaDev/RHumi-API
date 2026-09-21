@@ -98,10 +98,10 @@ function assinarTokenRefresh(payload: TokenPayload): string {
  * vazar se o login existe ou não para um atacante enumerativo.
  */
 async function usuarioExisteEValidoParaLogin(
-    login: string,
+    loginOuEmail: string,
     senha: string
 ): Promise<NonNullable<Awaited<ReturnType<typeof usuariosRepositorio["buscarPorLogin"]>>>> {
-    const usuario = await usuariosRepositorio.buscarPorLogin(login);
+    const usuario = await usuariosRepositorio.buscarPorLogin(loginOuEmail);
     if (!usuario) {
         throw new AppError("Credenciais inválidas.", 401);
     }
@@ -125,26 +125,28 @@ export const authService = {
      * Fluxo de login: valida credenciais → emite access + refresh token.
      */
     async autenticar(dto: LoginDTO): Promise<TokenResponse> {
-        const usuario = await usuarioExisteEValidoParaLogin(dto.login, dto.senha);
+        const loginOuEmail = dto.login ?? dto.email;
 
-        const basePayload: TokenPayload = {
+        if (!loginOuEmail) {
+            throw new AppError("Informe login ou email para autenticar.", 400);
+        }
+
+        const usuario = await usuarioExisteEValidoParaLogin(loginOuEmail, dto.senha);
+
+        const basePayload: Omit<TokenPayload, "exp"> = {
             id: usuario.id,
             userLogin: usuario.login,
             classificacao: usuario.classificacao,
             jti: gerarJti(),
-            // `exp` é sobrescrito abaixo por cada tipo de token.
-            exp: 0,
         };
 
-        const accessPayload: TokenPayload = {
+        const accessPayload: Omit<TokenPayload, "exp"> = {
             ...basePayload,
-            exp: Math.floor(Date.now() / 1000) + env.accessTokenCookieMaxAgeSec,
         };
-        const refreshPayload: TokenPayload = {
+        const refreshPayload: Omit<TokenPayload, "exp"> = {
             ...basePayload,
             // Refresh token tem seu PRÓPRIO jti para blacklist granular.
             jti: gerarJti(),
-            exp: Math.floor(Date.now() / 1000) + env.refreshTokenCookieMaxAgeSec,
         };
 
         return {

@@ -17,8 +17,17 @@ import { z } from "zod";
  *   - gestor  : Gerente de setor, permissões intermediárias (a definir).
  *   - usuario : Usuário final, permissões mínimas.
  */
-export const classificacaoEnum = z.enum(["sakai", "admin", "gestor", "usuario"], {
-    message: "Classificação deve ser: sakai, admin, gestor ou usuario.",
+export const classificacaoEnum = z.enum([
+    "sakai",
+    "admin",
+    "gestor",
+    "usuario",
+    "HR_ADMIN",
+    "SUPERVISOR",
+    "EMPLOYEE",
+    "CANDIDATE",
+], {
+    message: "Classificação deve ser um perfil válido do sistema RHumi.",
 });
 
 export type Classificacao = z.infer<typeof classificacaoEnum>;
@@ -96,8 +105,8 @@ export const userIdParamsSchema = z.object({
     id: z.string()
         .trim()
         .min(1, { message: "ID é obrigatório." })
-        .refine((v) => Number.isInteger(Number(v)) && Number(v) > 0, {
-            message: "ID deve ser um número inteiro positivo.",
+        .refine((v) => /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$/.test(v), {
+            message: "ID deve ser um UUID válido.",
         }),
 });
 
@@ -138,7 +147,7 @@ export type ListUsersQuery = z.infer<typeof listUsersQuerySchema>;
  * Usado em todas as respostas de listagem/detalhe/atualização.
  */
 export interface Usuario {
-    id: number;
+    id: string;
     login: string;
     nome: string;
     email: string;

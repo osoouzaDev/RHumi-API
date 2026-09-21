@@ -26,7 +26,10 @@ export function authAdmin(
         return res.status(401).json({ message: "Usuário não autenticado." });
     }
 
-    if (req.user.classificacao !== "sakai") {
+    const perfil = String(req.user.classificacao ?? "").trim().toLowerCase();
+    const perfisPermitidos = new Set(["sakai", "admin", "hr_admin", "supervisor"]);
+
+    if (!perfisPermitidos.has(perfil)) {
         return res.status(403).json({
             message: "Acesso negado. Apenas usuários administradores podem acessar este recurso."
         });

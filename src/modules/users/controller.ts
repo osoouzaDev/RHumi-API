@@ -111,7 +111,7 @@ export const usersController = {
     ): Promise<void> {
         try {
             const params = validatedParams<UserIdParams>(req);
-            const id = Number(params.id);
+            const id = params.id;
             const usuario = await usuariosService.buscarPorId(id);
             success<Usuario>(res, usuario, 200);
         } catch (error) {
@@ -181,7 +181,7 @@ export const usersController = {
         try {
             const params = validatedParams<UserIdParams>(req);
             const dto = validatedBody<UpdateUserDTO>(req);
-            const id = Number(params.id);
+            const id = params.id;
             const usuario = await usuariosService.atualizar(id, dto);
             success<Usuario>(res, usuario, 200);
         } catch (error) {
@@ -270,7 +270,7 @@ export const usersController = {
         try {
             const params = validatedParams<UserIdParams>(req);
             const dto = validatedBody<UpdateUserPasswordDTO>(req);
-            const id = Number(params.id);
+            const id = params.id;
             await usuariosService.atualizarSenha(id, dto);
             noContent(res);
         } catch (error) {
@@ -302,7 +302,7 @@ export const usersController = {
     ): Promise<void> {
         try {
             const params = validatedParams<UserIdParams>(req);
-            const id = Number(params.id);
+            const id = params.id;
             await usuariosService.deletar(id);
             noContent(res);
         } catch (error) {

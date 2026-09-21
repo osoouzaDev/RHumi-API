@@ -65,15 +65,51 @@ export const usuariosRepositorio = {
      * @returns        Resposta paginada tipada como `PaginatedResponse<Usuario>`.
      */
     async listar(filtros: ListUsersQuery): Promise<PaginatedResponse<Usuario>> {
-        console.debug("[UsuariosRepositorio] listar() - tabela usuarios ainda não implementada.", filtros);
-        // STUB: quando a tabela for criada, substituir por SELECT real com paginação server-side
+        const pagina = Number.isFinite(Number(filtros.pagina)) ? Number(filtros.pagina) : 1;
+        const porPagina = Number.isFinite(Number(filtros.por_pagina)) ? Number(filtros.por_pagina) : 20;
+        const offset = (pagina - 1) * porPagina;
+
+        const totalResult = await banco.query(
+            "SELECT COUNT(*)::int AS total FROM usuario"
+        );
+
+        const rowsResult = await banco.query(
+            `
+                SELECT
+                    id::text AS id,
+                    nome,
+                    email,
+                    email AS login,
+                    'admin'::text AS classificacao,
+                    ativo,
+                    created_at AS data_criacao,
+                    updated_at AS data_atualizacao
+                FROM usuario
+                ORDER BY created_at DESC
+                LIMIT $1 OFFSET $2
+            `,
+            [porPagina, offset]
+        );
+
+        const total = Number(totalResult.rows[0]?.total ?? 0);
+        const dados = rowsResult.rows.map((row) => ({
+            id: String(row.id),
+            login: String(row.login ?? row.email),
+            nome: String(row.nome),
+            email: String(row.email),
+            classificacao: "admin" as const,
+            ativo: Boolean(row.ativo),
+            data_criacao: new Date(row.data_criacao as string).toISOString(),
+            data_atualizacao: new Date(row.data_atualizacao as string).toISOString(),
+        }));
+
         return {
-            dados: [],
+            dados,
             meta: {
-                pagina: filtros.pagina,
-                por_pagina: filtros.por_pagina,
-                total: 0,
-                total_paginas: 0,
+                pagina,
+                por_pagina: porPagina,
+                total,
+                total_paginas: Math.max(1, Math.ceil(total / porPagina)),
             },
         };
     },
@@ -94,10 +130,38 @@ export const usuariosRepositorio = {
      * @param id - Chave primária numérica do usuário.
      * @returns    Instância de `Usuario` ou `null` se não encontrado.
      */
-    async buscarPorId(id: number): Promise<Usuario | null> {
-        console.debug("[UsuariosRepositorio] buscarPorId() - tabela usuarios ainda não implementada.", id);
-        // STUB: substituir por query parametrizada SELECT ... WHERE id = $1
-        return null;
+    async buscarPorId(id: string): Promise<Usuario | null> {
+        const result = await banco.query(
+            `
+                SELECT
+                    id::text AS id,
+                    nome,
+                    email,
+                    email AS login,
+                    'admin'::text AS classificacao,
+                    ativo,
+                    created_at AS data_criacao,
+                    updated_at AS data_atualizacao
+                FROM usuario
+                WHERE id = $1
+                LIMIT 1
+            `,
+            [id]
+        );
+
+        const row = result.rows[0];
+        if (!row) return null;
+
+        return {
+            id: String(row.id),
+            login: String(row.login ?? row.email),
+            nome: String(row.nome),
+            email: String(row.email),
+            classificacao: "admin",
+            ativo: Boolean(row.ativo),
+            data_criacao: new Date(row.data_criacao as string).toISOString(),
+            data_atualizacao: new Date(row.data_atualizacao as string).toISOString(),
+        };
     },
 
     /**
@@ -117,9 +181,41 @@ export const usuariosRepositorio = {
      * @returns       Instância `UsuarioComSenha` ou `null` se não encontrado.
      */
     async buscarPorLogin(login: string): Promise<UsuarioComSenha | null> {
-        console.debug("[UsuariosRepositorio] buscarPorLogin() - tabela usuarios ainda não implementada.", login);
-        // STUB: substituir por query que selecione a coluna senha_hash (necessário ao auth)
-        return null;
+        const result = await banco.query(
+            `
+                SELECT
+                    id::text AS id,
+                    nome,
+                    email,
+                    email AS login,
+                    senha_hash,
+                    'admin'::text AS classificacao,
+                    ativo,
+                    created_at AS data_criacao,
+                    updated_at AS data_atualizacao
+                FROM usuario
+                WHERE LOWER(email) = LOWER($1)
+                   OR LOWER(nome) = LOWER($1)
+                ORDER BY created_at DESC
+                LIMIT 1
+            `,
+            [login]
+        );
+
+        const row = result.rows[0];
+        if (!row) return null;
+
+        return {
+            id: String(row.id),
+            login: String(row.login ?? row.email),
+            nome: String(row.nome),
+            email: String(row.email),
+            classificacao: "admin",
+            ativo: Boolean(row.ativo),
+            data_criacao: new Date(row.data_criacao as string).toISOString(),
+            data_atualizacao: new Date(row.data_atualizacao as string).toISOString(),
+            senha_hash: String(row.senha_hash),
+        };
     },
 
     /**
@@ -134,9 +230,37 @@ export const usuariosRepositorio = {
      * @returns       Instância `Usuario` ou `null`.
      */
     async buscarPorEmail(email: string): Promise<Usuario | null> {
-        console.debug("[UsuariosRepositorio] buscarPorEmail() - tabela usuarios ainda não implementada.", email);
-        // STUB: substituir por SELECT ... WHERE email ILIKE $1 (case insensitive)
-        return null;
+        const result = await banco.query(
+            `
+                SELECT
+                    id::text AS id,
+                    nome,
+                    email,
+                    email AS login,
+                    'admin'::text AS classificacao,
+                    ativo,
+                    created_at AS data_criacao,
+                    updated_at AS data_atualizacao
+                FROM usuario
+                WHERE LOWER(email) = LOWER($1)
+                LIMIT 1
+            `,
+            [email]
+        );
+
+        const row = result.rows[0];
+        if (!row) return null;
+
+        return {
+            id: String(row.id),
+            login: String(row.login ?? row.email),
+            nome: String(row.nome),
+            email: String(row.email),
+            classificacao: "admin",
+            ativo: Boolean(row.ativo),
+            data_criacao: new Date(row.data_criacao as string).toISOString(),
+            data_atualizacao: new Date(row.data_atualizacao as string).toISOString(),
+        };
     },
 
     /**
@@ -182,7 +306,7 @@ export const usuariosRepositorio = {
      * @returns     O usuário após atualização (projeção sem senha_hash).
      * @throws      AppError(503) enquanto a tabela não existir.
      */
-    async atualizar(_id: number, _dto: UpdateUserDTO): Promise<Usuario> {
+    async atualizar(_id: string, _dto: UpdateUserDTO): Promise<Usuario> {
         throw new AppError(
             "Recurso temporariamente indisponível: tabela de usuários ainda não foi criada no banco de dados.",
             503
@@ -204,7 +328,7 @@ export const usuariosRepositorio = {
      * @param _senhaHash  - Hash scrypt já produzida por `authService.hashSenha()`.
      * @throws            AppError(503) enquanto a tabela não existir.
      */
-    async atualizarSenha(_id: number, _senhaHash: string): Promise<void> {
+    async atualizarSenha(_id: string, _senhaHash: string): Promise<void> {
         throw new AppError(
             "Recurso temporariamente indisponível: tabela de usuários ainda não foi criada no banco de dados.",
             503
@@ -226,7 +350,7 @@ export const usuariosRepositorio = {
      * @param _id - Chave primária do usuário a ser removido.
      * @throws     AppError(503) enquanto a tabela não existir.
      */
-    async deletar(_id: number): Promise<void> {
+    async deletar(_id: string): Promise<void> {
         throw new AppError(
             "Recurso temporariamente indisponível: tabela de usuários ainda não foi criada no banco de dados.",
             503
