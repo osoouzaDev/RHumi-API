@@ -66,7 +66,8 @@ function gerarJti(): string {
  * `expiresIn` = `env.accessTokenCookieMaxAgeSec` (padrão 30 min).
  */
 function assinarTokenAcesso(payload: TokenPayload): string {
-    return jwt.sign(payload, env.jwtSecret, {
+    const { exp: _ignoredExp, ...jwtPayload } = payload;
+    return jwt.sign(jwtPayload, env.jwtSecret, {
         algorithm: "HS256",
         issuer: env.jwtIssuer,
         audience: env.jwtAudience,
@@ -80,7 +81,8 @@ function assinarTokenAcesso(payload: TokenPayload): string {
  * access token sem exigir login/senha novamente.
  */
 function assinarTokenRefresh(payload: TokenPayload): string {
-    return jwt.sign(payload, env.jwtSecret, {
+    const { exp: _ignoredExp, ...jwtPayload } = payload;
+    return jwt.sign(jwtPayload, env.jwtSecret, {
         algorithm: "HS256",
         issuer: env.jwtIssuer,
         audience: env.jwtAudience,
@@ -194,12 +196,11 @@ export const authService = {
         }
 
         const novoJti = gerarJti();
-        const accessPayload: TokenPayload = {
+        const accessPayload: Omit<TokenPayload, "exp"> = {
             id: usuario.id,
             userLogin: usuario.login,
             classificacao: usuario.classificacao,
             jti: novoJti,
-            exp: Math.floor(Date.now() / 1000) + env.accessTokenCookieMaxAgeSec,
         };
 
         return {
