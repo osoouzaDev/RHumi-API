@@ -11,12 +11,7 @@
  *   unitários) sem impacto na camada de serviço.
  * - Centralizar queries parametrizadas, evitando duplicação e SQL Injection.
  *
- * Situação atual: STUB (Implementação Provisória).
- * Como as tabelas do banco de dados ainda não foram criadas (fase inicial do projeto),
- * os métodos de escrita (criar/atualizar/deletar) lançam `AppError` HTTP 503
- * (Service Unavailable), e os métodos de leitura retornam coleções vazias ou `null`.
- * Quando o DDL de `usuarios` for disponibilizado, substituir os stubs por queries
- * reais via `banco.query()` (consultas simples) ou `banco.getClient()` (transações).
+ * A tabela de usuários é `public.usuario`, conforme a migration inicial.
  *
  * Observações de Segurança (OWASP SQL Injection Prevention Cheat Sheet):
  * - Todas as queries reais a serem implementadas DEVEM utilizar parametrização
@@ -284,11 +279,55 @@ export const usuariosRepositorio = {
      * @returns      O usuário recém-criado com os campos públicos.
      * @throws       AppError(503) enquanto a tabela não existir.
      */
-    async criar(_dto: CreateUserDTO): Promise<Usuario> {
-        throw new AppError(
-            "Recurso temporariamente indisponível: tabela de usuários ainda não foi criada no banco de dados.",
-            503
-        );
+    async criar(dto: CreateUserDTO): Promise<Usuario> {
+        const idEmpresa = process.env.DEFAULT_EMPRESA_ID?.trim();
+
+        if (!idEmpresa) {
+            throw new AppError(
+                "Não foi possível criar o usuário: DEFAULT_EMPRESA_ID não está configurada.",
+                500
+            );
+        }
+
+        try {
+            const result = await banco.query(
+                `
+                    INSERT INTO public.usuario
+                        (id_empresa, nome, email, senha_hash, ativo)
+                    VALUES ($1, $2, $3, $4, $5)
+                    RETURNING
+                        id::text AS id,
+                        nome,
+                        email,
+                        ativo,
+                        created_at AS data_criacao,
+                        updated_at AS data_atualizacao
+                `,
+                [idEmpresa, dto.nome, dto.email, dto.senha, dto.ativo]
+            );
+
+            const row = result.rows[0];
+            if (!row) {
+                throw new Error("O banco não retornou o usuário criado.");
+            }
+
+            return {
+                id: String(row.id),
+                login: dto.login,
+                nome: String(row.nome),
+                email: String(row.email),
+                classificacao: dto.classificacao,
+                ativo: Boolean(row.ativo),
+                data_criacao: new Date(row.data_criacao as string).toISOString(),
+                data_atualizacao: new Date(row.data_atualizacao as string).toISOString(),
+            };
+        } catch (error: unknown) {
+            if (error && typeof error === "object" && "code" in error && error.code === "23505") {
+                throw new AppError("Email já cadastrado no sistema.", 409);
+            }
+
+            throw error;
+        }
     },
 
     /**
