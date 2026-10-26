@@ -34,6 +34,7 @@ import type {
     ListUsersQuery,
     PaginatedResponse,
     UsuarioComSenha,
+    UsuarioCriado,
 } from "./dto.js";
 import { usuariosRepositorio } from "./repository.js";
 import { authService } from "../auth/service.js";
@@ -53,6 +54,10 @@ import { AppError } from "../../shared/errors/app-error.js";
  *                          atualizarSenhaPropria no controller que chama este mesmo método).
  */
 export const usuariosService = {
+    async listarSetoresPorUsuario(usuarioId: string): Promise<string[]> {
+        return await usuariosRepositorio.listarSetoresPorUsuario(usuarioId);
+    },
+
     /**
      * Lista paginada de usuários com aplicação de filtros.
      *
@@ -124,7 +129,7 @@ export const usuariosService = {
      * @throws      AppError(409) em caso de conflito de unicidade; AppError(503)
      *              enquanto tabela não for criada.
      */
-    async criar(dto: CreateUserDTO): Promise<Usuario> {
+    async criar(dto: CreateUserDTO): Promise<UsuarioCriado> {
         // Invariante I: login único
         const existentePorLogin = await usuariosRepositorio.buscarPorLogin(dto.login);
         if (existentePorLogin) {
@@ -264,6 +269,15 @@ export const usuariosService = {
         // imediatamente antes da persistência, nunca armazenada em claro.
         const novaHash = authService.hashSenha(dto.nova_senha);
         await usuariosRepositorio.atualizarSenha(id, novaHash);
+    },
+
+    async resetarSenha(id: string, novaSenha: string): Promise<void> {
+        const usuario = await usuariosRepositorio.buscarPorId(id);
+        if (!usuario) {
+            throw new AppError("Usuário não encontrado.", 404);
+        }
+
+        await usuariosRepositorio.atualizarSenha(id, authService.hashSenha(novaSenha));
     },
 
     /**

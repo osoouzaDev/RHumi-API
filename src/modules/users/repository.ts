@@ -1,8 +1,8 @@
 /**
- * Camada de Acesso a Dados (Data Access Layer - Repositório) para a entidade Usuário.
+ * Camada de Acesso a Dados (Data Access Layer - Repositório) para a entidade Usuário e Colaborador.
  *
  * Este módulo implementa o padrão Repository (Fowler, 2002), encapsulando toda a
- * lógica de persistência e recuperação de objetos do domínio `Usuario` no SGBD.
+ * lógica de persistência e recuperação de objetos do domínio `Usuario` e `Colaborador` no SGBD.
  *
  * Finalidade arquitetural (SRP - Single Responsibility Principle):
  * - Isolar a camada de negócios (Service) dos detalhes tecnológicos do mecanismo
@@ -11,7 +11,7 @@
  *   unitários) sem impacto na camada de serviço.
  * - Centralizar queries parametrizadas, evitando duplicação e SQL Injection.
  *
- * A tabela de usuários é `public.usuario`, conforme a migration inicial.
+ * As tabelas gerenciadas são `public.usuario` e `public.usuario_colaborador`, conforme a migration inicial.
  *
  * Observações de Segurança (OWASP SQL Injection Prevention Cheat Sheet):
  * - Todas as queries reais a serem implementadas DEVEM utilizar parametrização
@@ -23,80 +23,127 @@
  */
 
 import type {
+    Classificacao,
     Usuario,
     UsuarioComSenha,
     CreateUserDTO,
     UpdateUserDTO,
     ListUsersQuery,
     PaginatedResponse,
+    UsuarioCriado,
 } from "./dto.js";
 import { banco } from "../../database/connection.js";
 import { AppError } from "../../shared/errors/app-error.js";
+
+function usuarioFromRow(row: Record<string, unknown>): Usuario {
+    return {
+        id: String(row.id),
+        login: String(row.login ?? row.email),
+        nome: String(row.nome),
+        email: String(row.email),
+        classificacao: (row.classificacao as Classificacao) || "HR_ADMIN",
+        ativo: Boolean(row.ativo),
+        data_criacao: new Date(row.data_criacao as string).toISOString(),
+        data_atualizacao: new Date(row.data_atualizacao as string).toISOString(),
+        telefone: row.telefone == null ? null : String(row.telefone),
+        setor: row.setor == null ? null : String(row.setor),
+        cargo: row.cargo == null ? null : String(row.cargo),
+        tipo_contrato: row.tipo_contrato == null
+            ? null
+            : row.tipo_contrato as NonNullable<Usuario["tipo_contrato"]>,
+        data_admissao: row.data_admissao == null ? null : String(row.data_admissao).slice(0, 10),
+        descricao_cargo: row.descricao_cargo == null ? null : String(row.descricao_cargo),
+    };
+}
 
 /**
  * Fachada do repositório de usuários.
  *
  * Implementa um objeto literal (strategy pattern aplicado a DAL) com todos os
- * pontos de contato com a tabela `usuarios`. Em projetos que adotam injeção de
- * dependência (DIP - Dependency Inversion Principle), esta fachada seria
- * substituída por uma classe que implementa uma interface `IUsuariosRepository`.
- * Para o escopo atual (MVP), o padrão singleton-export é suficiente e mantém
- * a complexidade acidental baixa.
+ * pontos de contato com as tabelas `usuario` e `usuario_colaborador`.
  */
 export const usuariosRepositorio = {
+    async listarSetoresPorUsuario(usuarioId: string): Promise<string[]> {
+        const result = await banco.query(
+            `
+                SELECT s.nome_setor
+                FROM setor s
+                JOIN usuario u ON u.id_empresa = s.id_empresa
+                WHERE u.id = $1
+                ORDER BY s.nome_setor
+            `,
+            [usuarioId]
+        );
+
+        return result.rows.map((row) => String(row.nome_setor));
+    },
+
     /**
      * Lista usuários com suporte a paginação e filtros por classificação e busca textual.
-     *
-     * O método corresponde ao caso de uso "Consultar Usuários" (gestor/admin).
-     * Implementação provisória retorna coleção vazia; a versão definitiva deverá:
-     * 1. Aplicar `WHERE` condicional para `classificacao` (se informada).
-     * 2. Aplicar `ILIKE '%termo%'` nos campos `nome`, `login`, `email` (se `busca`).
-     * 3. Realizar contagem total (`COUNT(*) OVER()`) para alimentar `meta.total`.
-     * 4. Aplicar cláusulas `LIMIT por_pagina OFFSET (pagina-1)*por_pagina`.
-     * 5. Nunca projetar a coluna `senha_hash` no resultado.
-     *
-     * @param filtros - Objeto contendo paginação (pagina, por_pagina) e filtros
-     *                  opcionais (classificacao, busca).
-     * @returns        Resposta paginada tipada como `PaginatedResponse<Usuario>`.
      */
     async listar(filtros: ListUsersQuery): Promise<PaginatedResponse<Usuario>> {
         const pagina = Number.isFinite(Number(filtros.pagina)) ? Number(filtros.pagina) : 1;
         const porPagina = Number.isFinite(Number(filtros.por_pagina)) ? Number(filtros.por_pagina) : 20;
         const offset = (pagina - 1) * porPagina;
+        const busca = filtros.busca || null;
+        const classificacao = filtros.classificacao || null;
+        const ativo = filtros.ativo ?? null;
 
         const totalResult = await banco.query(
-            "SELECT COUNT(*)::int AS total FROM usuario"
+            `
+                SELECT COUNT(*)::int AS total
+                FROM usuario u
+                LEFT JOIN LATERAL (
+                    SELECT uc.classificacao
+                    FROM usuario_colaborador uc
+                    WHERE uc.id_usuario = u.id OR LOWER(uc.email) = LOWER(u.email)
+                    ORDER BY (uc.id_usuario = u.id) IS TRUE DESC, uc.created_at DESC
+                    LIMIT 1
+                ) uc ON TRUE
+                WHERE ($1::boolean IS NULL OR u.ativo = $1)
+                  AND ($2::text IS NULL OR COALESCE(uc.classificacao, 'HR_ADMIN') = $2)
+                  AND ($3::text IS NULL OR u.nome ILIKE '%' || $3 || '%' OR u.email ILIKE '%' || $3 || '%')
+            `,
+            [ativo, classificacao, busca]
         );
 
         const rowsResult = await banco.query(
             `
                 SELECT
-                    id::text AS id,
-                    nome,
-                    email,
-                    email AS login,
-                    'admin'::text AS classificacao,
-                    ativo,
-                    created_at AS data_criacao,
-                    updated_at AS data_atualizacao
-                FROM usuario
-                ORDER BY created_at DESC
-                LIMIT $1 OFFSET $2
+                    u.id::text AS id,
+                    u.nome,
+                    u.email,
+                    u.email AS login,
+                    COALESCE(uc.classificacao, 'HR_ADMIN')::text AS classificacao,
+                    u.ativo,
+                    u.created_at AS data_criacao,
+                    u.updated_at AS data_atualizacao,
+                    COALESCE(uc.telefone, u.telefone) AS telefone,
+                    s.nome_setor AS setor,
+                    uc.cargo,
+                    uc.tipo_contrato,
+                    TO_CHAR(uc.data_admissao, 'YYYY-MM-DD') AS data_admissao,
+                    uc.descricao_cargo
+                FROM usuario u
+                LEFT JOIN LATERAL (
+                    SELECT colaborador.*
+                    FROM usuario_colaborador colaborador
+                    WHERE colaborador.id_usuario = u.id OR LOWER(colaborador.email) = LOWER(u.email)
+                    ORDER BY (colaborador.id_usuario = u.id) IS TRUE DESC, colaborador.created_at DESC
+                    LIMIT 1
+                ) uc ON TRUE
+                LEFT JOIN setor s ON s.id = uc.id_setor
+                WHERE ($1::boolean IS NULL OR u.ativo = $1)
+                  AND ($2::text IS NULL OR COALESCE(uc.classificacao, 'HR_ADMIN') = $2)
+                  AND ($3::text IS NULL OR u.nome ILIKE '%' || $3 || '%' OR u.email ILIKE '%' || $3 || '%')
+                ORDER BY u.created_at DESC
+                LIMIT $4 OFFSET $5
             `,
-            [porPagina, offset]
+            [ativo, classificacao, busca, porPagina, offset]
         );
 
         const total = Number(totalResult.rows[0]?.total ?? 0);
-        const dados = rowsResult.rows.map((row) => ({
-            id: String(row.id),
-            login: String(row.login ?? row.email),
-            nome: String(row.nome),
-            email: String(row.email),
-            classificacao: "admin" as const,
-            ativo: Boolean(row.ativo),
-            data_criacao: new Date(row.data_criacao as string).toISOString(),
-            data_atualizacao: new Date(row.data_atualizacao as string).toISOString(),
-        }));
+        const dados = rowsResult.rows.map(usuarioFromRow);
 
         return {
             dados,
@@ -111,34 +158,35 @@ export const usuariosRepositorio = {
 
     /**
      * Recupera um usuário por sua chave primária (id).
-     *
-     * Equivalente SQL: SELECT id, nome, login, email, classificacao, ativo,
-     *                        created_at, updated_at
-     *                   FROM usuarios WHERE id = $1
-     *
-     * NÃO projete a coluna `senha_hash` neste método — ele é utilizado pelas
-     * rotas públicas de consulta de perfil (ex.: `GET /users/:id`) onde a hash
-     * nunca deve trafegar na resposta. Se precisar da hash em alguma regra de
-     * negócio (ex.: validação de senha atual), crie um método dedicado como
-     * `buscarPorIdComSenha()` para deixar a intenção explícita.
-     *
-     * @param id - Chave primária numérica do usuário.
-     * @returns    Instância de `Usuario` ou `null` se não encontrado.
      */
     async buscarPorId(id: string): Promise<Usuario | null> {
         const result = await banco.query(
             `
                 SELECT
-                    id::text AS id,
-                    nome,
-                    email,
-                    email AS login,
-                    'admin'::text AS classificacao,
-                    ativo,
-                    created_at AS data_criacao,
-                    updated_at AS data_atualizacao
-                FROM usuario
-                WHERE id = $1
+                    u.id::text AS id,
+                    u.nome,
+                    u.email,
+                    u.email AS login,
+                    COALESCE(uc.classificacao, 'HR_ADMIN')::text AS classificacao,
+                    u.ativo,
+                    u.created_at AS data_criacao,
+                    u.updated_at AS data_atualizacao,
+                    COALESCE(uc.telefone, u.telefone) AS telefone,
+                    s.nome_setor AS setor,
+                    uc.cargo,
+                    uc.tipo_contrato,
+                    TO_CHAR(uc.data_admissao, 'YYYY-MM-DD') AS data_admissao,
+                    uc.descricao_cargo
+                FROM usuario u
+                LEFT JOIN LATERAL (
+                    SELECT colaborador.*
+                    FROM usuario_colaborador colaborador
+                    WHERE colaborador.id_usuario = u.id OR LOWER(colaborador.email) = LOWER(u.email)
+                    ORDER BY (colaborador.id_usuario = u.id) IS TRUE DESC, colaborador.created_at DESC
+                    LIMIT 1
+                ) uc ON TRUE
+                LEFT JOIN setor s ON s.id = uc.id_setor
+                WHERE u.id = $1
                 LIMIT 1
             `,
             [id]
@@ -147,51 +195,33 @@ export const usuariosRepositorio = {
         const row = result.rows[0];
         if (!row) return null;
 
-        return {
-            id: String(row.id),
-            login: String(row.login ?? row.email),
-            nome: String(row.nome),
-            email: String(row.email),
-            classificacao: "admin",
-            ativo: Boolean(row.ativo),
-            data_criacao: new Date(row.data_criacao as string).toISOString(),
-            data_atualizacao: new Date(row.data_atualizacao as string).toISOString(),
-        };
+        return usuarioFromRow(row);
     },
 
     /**
-     * Recupera um usuário (COM SENHA_HASH) pelo identificador de login.
+     * Recupera um usuário (COM SENHA_HASH) pelo identificador de login ou email.
      *
      * Este método é um contrato exclusivo da camada de autenticação
      * (`authService`) e NUNCA deve ser invocado por controllers de CRUD comum.
-     * É o único ponto do repositório (junto de um futuro `buscarPorIdComSenha`)
-     * que projeta a coluna sensível `senha_hash`, necessário para o algoritmo
-     * de verificação de senha via `timingSafeEqual` em `authService.verificarSenha()`.
-     *
-     * Equivalente SQL: SELECT * (ou explicitamente id, nome, login, email,
-     *                         classificacao, ativo, senha_hash, ...)
-     *                   FROM usuarios WHERE login = $1 AND ativo = true
-     *
-     * @param login - Identificador único de login (único no banco).
-     * @returns       Instância `UsuarioComSenha` ou `null` se não encontrado.
      */
     async buscarPorLogin(login: string): Promise<UsuarioComSenha | null> {
         const result = await banco.query(
             `
                 SELECT
-                    id::text AS id,
-                    nome,
-                    email,
-                    email AS login,
-                    senha_hash,
-                    'admin'::text AS classificacao,
-                    ativo,
-                    created_at AS data_criacao,
-                    updated_at AS data_atualizacao
-                FROM usuario
-                WHERE LOWER(email) = LOWER($1)
-                   OR LOWER(nome) = LOWER($1)
-                ORDER BY created_at DESC
+                    u.id::text AS id,
+                    u.nome,
+                    u.email,
+                    u.email AS login,
+                    u.senha_hash,
+                    COALESCE(uc.classificacao, 'HR_ADMIN')::text AS classificacao,
+                    u.ativo,
+                    u.created_at AS data_criacao,
+                    u.updated_at AS data_atualizacao
+                FROM usuario u
+                LEFT JOIN usuario_colaborador uc ON (uc.id_usuario = u.id OR LOWER(uc.email) = LOWER(u.email))
+                WHERE LOWER(u.email) = LOWER($1)
+                   OR LOWER(u.nome) = LOWER($1)
+                ORDER BY u.created_at DESC
                 LIMIT 1
             `,
             [login]
@@ -205,7 +235,7 @@ export const usuariosRepositorio = {
             login: String(row.login ?? row.email),
             nome: String(row.nome),
             email: String(row.email),
-            classificacao: "admin",
+            classificacao: (row.classificacao as Classificacao) || "HR_ADMIN",
             ativo: Boolean(row.ativo),
             data_criacao: new Date(row.data_criacao as string).toISOString(),
             data_atualizacao: new Date(row.data_atualizacao as string).toISOString(),
@@ -214,15 +244,47 @@ export const usuariosRepositorio = {
     },
 
     /**
+     * Recupera um usuário ativo por seu código de colaborador de quatro dígitos.
+     */
+    async buscarPorCodigoColaborador(codigo: string): Promise<Usuario | null> {
+        const result = await banco.query(
+            `
+                SELECT
+                    u.id::text AS id,
+                    u.nome,
+                    u.email,
+                    u.email AS login,
+                    COALESCE(uc.classificacao, 'HR_ADMIN')::text AS classificacao,
+                    u.ativo,
+                    u.created_at AS data_criacao,
+                    u.updated_at AS data_atualizacao
+                FROM public.usuario u
+                LEFT JOIN usuario_colaborador uc
+                    ON (uc.id_usuario = u.id OR LOWER(uc.email) = LOWER(u.email))
+                WHERE u.codigo_colaborador = $1
+                ORDER BY u.created_at DESC
+                LIMIT 1
+            `,
+            [codigo]
+        );
+
+        const row = result.rows[0];
+        if (!row) return null;
+
+        return {
+            id: String(row.id),
+            login: String(row.login ?? row.email),
+            nome: String(row.nome),
+            email: String(row.email),
+            classificacao: (row.classificacao as Classificacao) || "HR_ADMIN",
+            ativo: Boolean(row.ativo),
+            data_criacao: new Date(row.data_criacao as string).toISOString(),
+            data_atualizacao: new Date(row.data_atualizacao as string).toISOString(),
+        };
+    },
+
+    /**
      * Recupera um usuário pelo endereço de e-mail.
-     *
-     * Utilizado principalmente pelas regras de unicidade de e-mail nos métodos
-     * `usuariosService.criar()` e `usuariosService.atualizar()`. A query real
-     * deve realizar uma busca CASE-INSENSITIVE (ex.: `WHERE LOWER(email) = LOWER($1)`)
-     * caso o banco não tenha um índice `citext` ou constraint unique com `citext`.
-     *
-     * @param email - Endereço de correio eletrônico do usuário.
-     * @returns       Instância `Usuario` ou `null`.
      */
     async buscarPorEmail(email: string): Promise<Usuario | null> {
         const result = await banco.query(
@@ -259,27 +321,9 @@ export const usuariosRepositorio = {
     },
 
     /**
-     * Persiste um novo usuário na tabela `usuarios`.
-     *
-     * Regras de pré-condição (já garantidas por `usuariosService.criar()`):
-     * - `dto.login` é único em relação aos registros existentes (verificado via
-     *   `buscarPorLogin`).
-     * - `dto.email` é único em relação aos registros existentes (verificado via
-     *   `buscarPorEmail`).
-     * - O campo `dto.senha` já contém o HASH da senha (NÃO a senha em claro),
-     *   produzido por `authService.hashSenha()`; a coluna destino deve ser
-     *   `senha VARCHAR(255)` — ou o nome exato `senha_hash` — para comportar
-     *   o prefixo `$scrypt$` + salt + hash do NIST SP 800-132.
-     *
-     * A query real deve utilizar `INSERT ... RETURNING id, nome, login, email,
-     * classificacao, ativo, created_at, updated_at` para já devolver a
-     * instância criada sem nova consulta, SEM retornar `senha_hash`.
-     *
-     * @param _dto - Payload de criação (campo `senha` já substituído pela hash).
-     * @returns      O usuário recém-criado com os campos públicos.
-     * @throws       AppError(503) enquanto a tabela não existir.
+     * Persiste um novo usuário na tabela `usuario`.
      */
-    async criar(dto: CreateUserDTO): Promise<Usuario> {
+    async criar(dto: CreateUserDTO): Promise<UsuarioCriado> {
         const idEmpresa = process.env.DEFAULT_EMPRESA_ID?.trim();
 
         if (!idEmpresa) {
@@ -289,8 +333,22 @@ export const usuariosRepositorio = {
             );
         }
 
+        const client = await banco.getClient();
         try {
-            const result = await banco.query(
+            await client.query("BEGIN");
+            let sectorId: string | null = null;
+            if (dto.setor?.trim()) {
+                const sectorResult = await client.query(
+                    `SELECT id::text AS id FROM setor WHERE id_empresa = $1 AND LOWER(nome_setor) = LOWER($2) LIMIT 1`,
+                    [idEmpresa, dto.setor.trim()]
+                );
+                if (!sectorResult.rows[0]) {
+                    throw new AppError("O setor selecionado não existe para esta empresa.", 400);
+                }
+                sectorId = String(sectorResult.rows[0].id);
+            }
+
+            const result = await client.query(
                 `
                     INSERT INTO public.usuario
                         (id_empresa, nome, email, senha_hash, ativo)
@@ -299,6 +357,7 @@ export const usuariosRepositorio = {
                         id::text AS id,
                         nome,
                         email,
+                        codigo_colaborador,
                         ativo,
                         created_at AS data_criacao,
                         updated_at AS data_atualizacao
@@ -311,83 +370,252 @@ export const usuariosRepositorio = {
                 throw new Error("O banco não retornou o usuário criado.");
             }
 
+            await client.query(
+                `
+                    INSERT INTO usuario_colaborador (
+                        id_empresa, id_usuario, id_setor, nome, email, telefone,
+                        classificacao, cargo, tipo_contrato, data_admissao,
+                        descricao_cargo, status
+                    )
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                `,
+                [
+                    idEmpresa,
+                    row.id,
+                    sectorId,
+                    dto.nome,
+                    dto.email,
+                    dto.telefone ?? null,
+                    dto.classificacao,
+                    dto.cargo ?? null,
+                    dto.tipo_contrato ?? null,
+                    dto.data_admissao ?? null,
+                    dto.descricao_cargo ?? null,
+                    dto.ativo ? "ATIVO" : "INATIVO",
+                ]
+            );
+
+            await client.query("COMMIT");
             return {
                 id: String(row.id),
                 login: dto.login,
                 nome: String(row.nome),
                 email: String(row.email),
+                codigo_colaborador: String(row.codigo_colaborador),
                 classificacao: dto.classificacao,
                 ativo: Boolean(row.ativo),
                 data_criacao: new Date(row.data_criacao as string).toISOString(),
                 data_atualizacao: new Date(row.data_atualizacao as string).toISOString(),
+                telefone: dto.telefone ?? null,
+                setor: dto.setor ?? null,
+                cargo: dto.cargo ?? null,
+                tipo_contrato: dto.tipo_contrato ?? null,
+                data_admissao: dto.data_admissao ?? null,
+                descricao_cargo: dto.descricao_cargo ?? null,
             };
         } catch (error: unknown) {
-            if (error && typeof error === "object" && "code" in error && error.code === "23505") {
-                throw new AppError("Email já cadastrado no sistema.", 409);
+            try {
+                await client.query("ROLLBACK");
+            } catch (rollbackError: unknown) {
+                throw new AggregateError(
+                    [error, rollbackError],
+                    "Falha ao reverter o cadastro do colaborador no banco de dados."
+                );
+            }
+            if (
+                error &&
+                typeof error === "object" &&
+                "code" in error &&
+                error.code === "23505"
+            ) {
+                throw new AppError("Email ou login já cadastrado no sistema.", 409);
             }
 
             throw error;
+        } finally {
+            client.release();
         }
     },
 
     /**
-     * Atualiza campos de um usuário existente (exceto `senha` e `login`, via regra de negócio).
-     *
-     * A query real deve fazer `UPDATE usuarios SET col1 = $1, ..., updated_at = NOW()
-     * WHERE id = $N RETURNING id, nome, login, email, classificacao, ativo, created_at, updated_at`.
-     *
-     * Observação: a atualização de senha tem seu método dedicado (`atualizarSenha`)
-     * para preservar a cadeia de custódia do processo de troca (validação da
-     * senha atual, nova passagem pelo hashing).
-     *
-     * @param _id  - Chave primária do usuário alvo.
-     * @param _dto - Campos parciais a serem atualizados (todos opcionais no schema).
-     * @returns     O usuário após atualização (projeção sem senha_hash).
-     * @throws      AppError(503) enquanto a tabela não existir.
+     * Atualiza campos de um usuário existente (exceto `senha` e `login`).
      */
-    async atualizar(_id: string, _dto: UpdateUserDTO): Promise<Usuario> {
-        throw new AppError(
-            "Recurso temporariamente indisponível: tabela de usuários ainda não foi criada no banco de dados.",
-            503
-        );
+    async atualizar(id: string, dto: UpdateUserDTO): Promise<Usuario> {
+        const client = await banco.getClient();
+
+        try {
+            await client.query("BEGIN");
+            const userResult = await client.query(
+                `SELECT id, id_empresa, nome, email, telefone, ativo FROM usuario WHERE id = $1 FOR UPDATE`,
+                [id]
+            );
+            const user = userResult.rows[0];
+            if (!user) {
+                throw new AppError("Usuário não encontrado.", 404);
+            }
+
+            const profileResult = await client.query(
+                `
+                    SELECT id, id_setor, classificacao, cargo, tipo_contrato,
+                           data_admissao, descricao_cargo, telefone, status
+                    FROM usuario_colaborador
+                    WHERE id_usuario = $1 OR LOWER(email) = LOWER($2)
+                    ORDER BY (id_usuario = $1) IS TRUE DESC, created_at DESC
+                    LIMIT 1
+                    FOR UPDATE
+                `,
+                [id, user.email]
+            );
+            const profile = profileResult.rows[0];
+
+            const userFields: Array<[keyof UpdateUserDTO, string]> = [
+                ["nome", "nome"],
+                ["email", "email"],
+                ["telefone", "telefone"],
+                ["ativo", "ativo"],
+            ];
+            const assignments: string[] = [];
+            const values: unknown[] = [];
+            for (const [dtoField, column] of userFields) {
+                if (dtoField in dto) {
+                    values.push(dto[dtoField]);
+                    assignments.push(`${column} = $${values.length}`);
+                }
+            }
+            assignments.push("updated_at = NOW()");
+            values.push(id);
+            await client.query(
+                `UPDATE usuario SET ${assignments.join(", ")} WHERE id = $${values.length}`,
+                values
+            );
+
+            const profileFields = [
+                "classificacao",
+                "setor",
+                "cargo",
+                "tipo_contrato",
+                "data_admissao",
+                "descricao_cargo",
+            ] as const;
+            const shouldUpdateProfile =
+                profileFields.some((field) => field in dto) ||
+                "nome" in dto ||
+                "email" in dto ||
+                "telefone" in dto ||
+                "ativo" in dto;
+
+            if (shouldUpdateProfile) {
+                let sectorId = profile?.id_setor ? String(profile.id_setor) : null;
+                if ("setor" in dto) {
+                    const sectorName = dto.setor?.trim();
+                    if (!sectorName) {
+                        sectorId = null;
+                    } else {
+                        const existingSector = await client.query(
+                            `SELECT id FROM setor WHERE id_empresa = $1 AND LOWER(nome_setor) = LOWER($2) LIMIT 1`,
+                            [user.id_empresa, sectorName]
+                        );
+                        if (existingSector.rows[0]) {
+                            sectorId = String(existingSector.rows[0].id);
+                        } else {
+                            throw new AppError("O setor selecionado não existe para esta empresa.", 400);
+                        }
+                    }
+                }
+
+                const profileValues = [
+                    user.id_empresa,
+                    id,
+                    sectorId,
+                    dto.nome ?? String(user.nome),
+                    dto.email ?? String(user.email),
+                    "telefone" in dto
+                        ? dto.telefone
+                        : profile?.telefone ?? user.telefone ?? null,
+                    dto.classificacao ?? profile?.classificacao ?? "HR_ADMIN",
+                    "cargo" in dto ? dto.cargo : profile?.cargo ?? null,
+                    "tipo_contrato" in dto ? dto.tipo_contrato : profile?.tipo_contrato ?? null,
+                    "data_admissao" in dto ? dto.data_admissao : profile?.data_admissao ?? null,
+                    "descricao_cargo" in dto
+                        ? dto.descricao_cargo
+                        : profile?.descricao_cargo ?? null,
+                    "ativo" in dto
+                        ? (dto.ativo ? "ATIVO" : "INATIVO")
+                        : profile?.status ?? (user.ativo ? "ATIVO" : "INATIVO"),
+                ];
+
+                if (profile) {
+                    await client.query(
+                        `
+                            UPDATE usuario_colaborador
+                            SET id_usuario = $1, id_setor = $2, nome = $3, email = $4,
+                                telefone = $5, classificacao = $6, cargo = $7,
+                                tipo_contrato = $8, data_admissao = $9,
+                                descricao_cargo = $10, status = $11, updated_at = NOW()
+                            WHERE id = $12
+                        `,
+                        [...profileValues.slice(1), profile.id]
+                    );
+                } else {
+                    await client.query(
+                        `
+                            INSERT INTO usuario_colaborador (
+                                id_empresa, id_usuario, id_setor, nome, email, telefone,
+                                classificacao, cargo, tipo_contrato, data_admissao,
+                                descricao_cargo, status
+                            )
+                            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                        `,
+                        profileValues
+                    );
+                }
+            }
+
+            await client.query("COMMIT");
+        } catch (error: unknown) {
+            try {
+                await client.query("ROLLBACK");
+            } catch (rollbackError: unknown) {
+                throw new AggregateError(
+                    [error, rollbackError],
+                    "Falha ao reverter a atualização do colaborador no banco de dados."
+                );
+            }
+            if (
+                error &&
+                typeof error === "object" &&
+                "code" in error &&
+                error.code === "23505"
+            ) {
+                throw new AppError("Email já cadastrado por outro usuário.", 409);
+            }
+            throw error;
+        } finally {
+            client.release();
+        }
+
+        const usuario = await this.buscarPorId(id);
+        if (!usuario) {
+            throw new AppError("Usuário não encontrado após a atualização.", 404);
+        }
+        return usuario;
     },
 
     /**
      * Atualiza exclusivamente a coluna `senha_hash` de um usuário.
-     *
-     * A separação deste método de `atualizar()` segue o ISP (Interface Segregation
-     * Principle) — controllers e serviços que só precisam alterar a senha não
-     * recebem acesso a campos não relacionados, e a auditoria é facilitada.
-     *
-     * Query real: `UPDATE usuarios SET senha_hash = $1, updated_at = NOW() WHERE id = $2`.
-     * Note que a operação não retorna nada (void), em conformidade com o Status
-     * Code HTTP 204 (No Content) que as rotas de alteração de senha respondem.
-     *
-     * @param _id         - Chave primária do usuário alvo.
-     * @param _senhaHash  - Hash scrypt já produzida por `authService.hashSenha()`.
-     * @throws            AppError(503) enquanto a tabela não existir.
      */
-    async atualizarSenha(_id: string, _senhaHash: string): Promise<void> {
-        throw new AppError(
-            "Recurso temporariamente indisponível: tabela de usuários ainda não foi criada no banco de dados.",
-            503
+    async atualizarSenha(id: string, senhaHash: string): Promise<void> {
+        const result = await banco.query(
+            `UPDATE usuario SET senha_hash = $1, updated_at = NOW() WHERE id = $2`,
+            [senhaHash, id]
         );
+        if (result.rowCount !== 1) {
+            throw new AppError("Usuário não encontrado.", 404);
+        }
     },
 
     /**
-     * Remove (exclusão lógica ou física) um usuário da base.
-     *
-     * A decisão entre exclusão lógica (SET ativo = false) e exclusão física
-     * (DELETE FROM) deve ser documentada na política de retenção de dados
-     * (LGPD — Lei Geral de Proteção de Dados, art. 15 a 18). Para sistemas RH,
-     * recomenda-se exclusão lógica por padrão, pois histórico funcional de
-     * colaboradores muitas vezes precisa ser preservado por prazo legal.
-     *
-     * Se adotar exclusão lógica, adaptar também `buscarPorLogin` para filtrar
-     * `WHERE ativo = true` (usuários inativos não podem autenticar).
-     *
-     * @param _id - Chave primária do usuário a ser removido.
-     * @throws     AppError(503) enquanto a tabela não existir.
+     * Remove um usuário da base.
      */
     async deletar(_id: string): Promise<void> {
         throw new AppError(
@@ -398,21 +626,6 @@ export const usuariosRepositorio = {
 
     /**
      * Método de conveniência para a camada de autenticação.
-     *
-     * Responsabilidade única: recuperar o registro pelo login e entregar ao
-     * chamador para que ele próprio execute a comparação de senha (delegação
-     * correta para não espalhar `timingSafeEqual` por todas as camadas).
-     *
-     * Atualmente o parâmetro `_senha` não é consumido neste stub pois a
-     * verificação de senha é de responsabilidade de `authService.verificarSenha()`.
-     * Manter a assinatura com o parâmetro preserva a interface pública caso
-     * deseje-se futuramente mover a verificação para dentro do próprio banco
-     * (ex.: stored function `criar_senha`), embora tal prática seja desaconselhada
-     * por reduzir a auditabilidade e dificultar a rotação de algoritmos de hash.
-     *
-     * @param login  - Login do usuário credenciado.
-     * @param _senha - Senha em claro fornecida no request (não usada aqui).
-     * @returns      Instância completa do usuário (com senha_hash) ou null.
      */
     async verificarCredenciais(
         login: string,
@@ -424,8 +637,4 @@ export const usuariosRepositorio = {
     },
 };
 
-/**
- * Exportação default (padrão barrel) para uso genérico.
- * Exportação nomeada (acima) mantida para importações seletivas e tree-shaking.
- */
 export default usuariosRepositorio;

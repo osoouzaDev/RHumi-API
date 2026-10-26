@@ -23,7 +23,8 @@
  * │ Consultar usuário por id                   │ GET      │ autenticado │
  * │ Criar novo usuário                         │ POST     │ admin/sakai│
  * │ Atualizar dados cadastrais                 │ PUT      │ admin/sakai│
- * │ Alterar senha de outrem                    │ PATCH    │ admin/sakai│
+ * │ Alterar senha confirmando senha atual       │ PATCH    │ admin/sakai│
+ * │ Redefinir senha de outrem                   │ PATCH    │ admin/sakai│
  * │ Alterar senha própria (/eu/senha)          │ PATCH    │ próprio    │
  * │ Excluir usuário                            │ DELETE   │ sakai      │
  * └────────────────────────────────────────────┴──────────┴────────────┘
@@ -46,17 +47,24 @@ import {
     createUserSchema,
     updateUserSchema,
     updateUserPasswordSchema,
+    resetUserPasswordSchema,
     userIdParamsSchema,
     listUsersQuerySchema,
 } from "../modules/users/dto.js";
 import { usersController } from "../modules/users/controller.js";
 import { autenticarToken } from "../middlewares/auth.js";
-import { authAdmin } from "../middlewares/authAdmin.js";
+import { authAdmin, authAdminOrSelf } from "../middlewares/authAdmin.js";
 
 /**
  * Instância do Router do Express para rotas de usuários.
  */
 export const usersRouter = Router();
+
+usersRouter.get(
+    "/api/setores",
+    autenticarToken,
+    usersController.listarSetores
+);
 
 /**
  * Rota: GET /api/usuarios — UC "Listar Usuários".
@@ -112,7 +120,7 @@ usersRouter.post(
 usersRouter.put(
     "/api/usuarios/:id",
     autenticarToken,
-    authAdmin,
+    authAdminOrSelf,
     validate({
         params: userIdParamsSchema,
         body: updateUserSchema,
@@ -126,9 +134,9 @@ usersRouter.put(
  * Fluxo diferente do auto-atendimento:
  *   - id do alvo vem da URL (`params.id`).
  *   - Middleware `authAdmin` obriga perfil elevado (admin/sakai).
- *   - Body ainda contém `senha_atual` (mesmo sendo admin, não há backdoor);
- *     para reset real de senha, implementar `POST /usuarios/:id/reset-senha`
- *     com token e-mail em versão futura.
+ *   - Body contém a senha atual como confirmação adicional.
+ *   - Para redefinição administrativa sem a senha atual, use
+ *     `PATCH /usuarios/:id/reset-senha`.
  */
 usersRouter.patch(
     "/api/usuarios/:id/senha",
@@ -139,6 +147,17 @@ usersRouter.patch(
         body: updateUserPasswordSchema,
     }),
     usersController.atualizarSenha
+);
+
+usersRouter.patch(
+    "/api/usuarios/:id/reset-senha",
+    autenticarToken,
+    authAdmin,
+    validate({
+        params: userIdParamsSchema,
+        body: resetUserPasswordSchema,
+    }),
+    usersController.resetarSenha
 );
 
 /**

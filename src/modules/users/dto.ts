@@ -6,6 +6,7 @@
  *   - Schemas Zod de validação de entrada para cada operação (CRUD + listagem).
  *   - Interfaces `Usuario` (público), `UsuarioComSenha` (privado com hash),
  *     `PaginatedResponse<T>` (envelope para listas paginadas).
+ *   - Interface `ColaboradorAutenticacao` para dados de login por código do colaborador.
  */
 
 import { z } from "zod";
@@ -56,6 +57,12 @@ export const createUserSchema = z.object({
         .max(255, { message: "Senha deve ter no máximo 255 caracteres." }),
     classificacao: classificacaoEnum.default("usuario"),
     ativo: z.boolean().default(true),
+    telefone: z.string().trim().max(30, { message: "Telefone deve ter no máximo 30 caracteres." }).nullable().optional(),
+    setor: z.string().trim().max(150, { message: "Setor deve ter no máximo 150 caracteres." }).nullable().optional(),
+    cargo: z.string().trim().max(150, { message: "Cargo deve ter no máximo 150 caracteres." }).nullable().optional(),
+    tipo_contrato: z.enum(["CLT", "PJ", "TEMPORARIO", "ESTAGIARIO"]).nullable().optional(),
+    data_admissao: z.iso.date().nullable().optional(),
+    descricao_cargo: z.string().trim().max(5000, { message: "Descrição do cargo deve ter no máximo 5000 caracteres." }).nullable().optional(),
 });
 
 export type CreateUserDTO = z.infer<typeof createUserSchema>;
@@ -77,6 +84,12 @@ export const updateUserSchema = z.object({
         .optional(),
     classificacao: classificacaoEnum.optional(),
     ativo: z.boolean().optional(),
+    telefone: z.string().trim().max(30, { message: "Telefone deve ter no máximo 30 caracteres." }).nullable().optional(),
+    setor: z.string().trim().max(150, { message: "Setor deve ter no máximo 150 caracteres." }).nullable().optional(),
+    cargo: z.string().trim().max(150, { message: "Cargo deve ter no máximo 150 caracteres." }).nullable().optional(),
+    tipo_contrato: z.enum(["CLT", "PJ", "TEMPORARIO", "ESTAGIARIO"]).nullable().optional(),
+    data_admissao: z.iso.date().nullable().optional(),
+    descricao_cargo: z.string().trim().max(5000, { message: "Descrição do cargo deve ter no máximo 5000 caracteres." }).nullable().optional(),
 });
 
 export type UpdateUserDTO = z.infer<typeof updateUserSchema>;
@@ -96,6 +109,15 @@ export const updateUserPasswordSchema = z.object({
 });
 
 export type UpdateUserPasswordDTO = z.infer<typeof updateUserPasswordSchema>;
+
+export const resetUserPasswordSchema = z.object({
+    nova_senha: z.string({ message: "Nova senha é obrigatória." })
+        .trim()
+        .min(8, { message: "Nova senha deve ter pelo menos 8 caracteres." })
+        .max(255, { message: "Nova senha deve ter no máximo 255 caracteres." }),
+});
+
+export type ResetUserPasswordDTO = z.infer<typeof resetUserPasswordSchema>;
 
 /**
  * Schema de params para rotas `/usuarios/:id`.
@@ -155,6 +177,16 @@ export interface Usuario {
     ativo: boolean;
     data_criacao: string;
     data_atualizacao: string;
+    telefone?: string | null;
+    setor?: string | null;
+    cargo?: string | null;
+    tipo_contrato?: "CLT" | "PJ" | "TEMPORARIO" | "ESTAGIARIO" | null;
+    data_admissao?: string | null;
+    descricao_cargo?: string | null;
+}
+
+export interface UsuarioCriado extends Usuario {
+    codigo_colaborador: string;
 }
 
 /**
@@ -165,6 +197,9 @@ export interface UsuarioComSenha extends Usuario {
     senha_hash: string;
 }
 
+/**
+ * Dados do colaborador recuperados para autenticação via código do colaborador.
+ */
 /**
  * Envelope de paginação padrão.
  *   - dados : array tipado de registros da página atual.

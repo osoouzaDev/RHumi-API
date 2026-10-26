@@ -3,30 +3,26 @@
  * de autenticação (`auth`).
  *
  * Papéis:
- *   - `loginSchema` / `refreshTokenSchema`  : schemas Zod usados pelo
- *     middleware `validate` para garantir entrada correta nos endpoints.
- *   - `LoginDTO`, `RefreshTokenDTO`         : tipos derivados do schema
- *     (`z.infer`) — usados pelo service para evitar duplicação de tipagem.
- *   - `TokenResponse`, `LogoutResponse`     : formato das respostas HTTP
- *     devolvidas pelo controller.
+ *   - `loginEmailSenhaSchema`: schema para autenticação tradicional por email/login e senha.
+ *   - `loginCodigoSchema`: schema para autenticação por código do colaborador.
+ *   - `loginSchema`: schema unificado que aceita ou email+senha ou código do colaborador.
+ *   - `refreshTokenSchema`: schema Zod para renovação de access tokens.
+ *   - `TokenResponse`, `LogoutResponse`: formato das respostas HTTP devolvidas pelo controller.
  */
 
 import { z } from "zod";
 
 /**
- * Schema de login. Valida login (3-100 chars) e senha (6-255 chars).
- * Nota: o limite mínimo de 6 caracteres para senha aqui é propositalmente
- * flexível (apenas um sanity check); a política forte de criação fica em
- * `users/dto.ts → createUserSchema (8 chars)`. Permitir 6 aqui evita
- * bloquear contas antigas criadas com política anterior.
+ * Schema de autenticação tradicional (email ou login + senha).
+ * Valida login (3-100 chars) ou email e senha (6-255 chars).
  */
-export const loginSchema = z.object({
-    login: z.string({ message: "Login é obrigatório." })
+export const loginEmailSenhaSchema = z.object({
+    login: z.string({ message: "Login deve ser uma string." })
         .trim()
         .min(3, { message: "Login deve ter pelo menos 3 caracteres." })
         .max(100, { message: "Login deve ter no máximo 100 caracteres." })
         .optional(),
-    email: z.string({ message: "Email é obrigatório." })
+    email: z.string({ message: "Email deve ser uma string." })
         .trim()
         .email({ message: "Email inválido." })
         .max(200, { message: "Email deve ter no máximo 200 caracteres." })
@@ -37,14 +33,43 @@ export const loginSchema = z.object({
         .max(255, { message: "Senha deve ter no máximo 255 caracteres." }),
 }).refine((value) => Boolean(value.login || value.email), {
     message: "Informe login ou email para autenticar.",
-    path: ["login"],
+    path: ["email"],
 });
 
-export type LoginDTO = z.infer<typeof loginSchema> & {
+export type LoginEmailSenhaDTO = z.infer<typeof loginEmailSenhaSchema> & {
     login?: string;
     email?: string;
     senha: string;
 };
+
+/**
+ * Schema de autenticação por código do colaborador.
+ *
+ * O código do colaborador corresponde ao código numérico de quatro dígitos
+ * cadastrado na tabela `usuario`.
+ */
+export const loginCodigoSchema = z.object({
+    codigo_colaborador: z.string({ message: "Código do colaborador é obrigatório." })
+        .trim()
+        .regex(/^\d{4}$/, { message: "O código do colaborador deve ter exatamente 4 dígitos." }),
+});
+
+export type LoginCodigoDTO = z.infer<typeof loginCodigoSchema>;
+
+/**
+ * Schema unificado para POST /api/auth/login.
+ * Aceita tanto e-mail e senha quanto código do colaborador.
+ */
+export const loginSchema = z.union([
+    loginEmailSenhaSchema,
+    loginCodigoSchema,
+], {
+    message: "Informe e-mail e senha ou o código do colaborador para autenticar.",
+});
+
+export type LoginDTO =
+    | ({ email?: string; login?: string; senha: string; codigo_colaborador?: never })
+    | ({ codigo_colaborador: string; email?: never; login?: never; senha?: never });
 
 /**
  * Schema de refresh. O `refresh_token` é opcional no BODY pois pode ser

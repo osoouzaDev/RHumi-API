@@ -33,9 +33,12 @@ import type {
     ListUsersQuery,
     UserIdParams,
     Usuario,
+    UsuarioCriado,
     PaginatedResponse,
+    ResetUserPasswordDTO,
 } from "./dto.js";
 import type { AuthRequest } from "../../middlewares/auth.js";
+import { AppError } from "../../shared/errors/app-error.js";
 
 /**
  * Fachada de controllers do recurso `/users`.
@@ -50,11 +53,25 @@ import type { AuthRequest } from "../../middlewares/auth.js";
  * │ PATCH  /users/:id      │ atualizar                │ Editar dados           │
  * │ PATCH  /users/me/password │ atualizarSenhaPropria │ Auto-alterar senha     │
  * │ PATCH  /users/:id/password │ atualizarSenha     │ Admin altera senha     │
+ * │ PATCH  /users/:id/reset-password │ resetarSenha  │ Admin redefine senha   │
  * │ DELETE /users/:id      │ deletar                  │ Remover usuário        │
  * └────────────────────────┴──────────────────────────┴────────────────────────┘
  * (O mapeamento rota → handler é feito em `src/routes/users.ts`.)
  */
 export const usersController = {
+    async listarSetores(req: Request, res: Response, next: NextFunction): Promise<void> {
+        try {
+            const requester = (req as AuthRequest).user;
+            if (!requester?.id) {
+                throw new AppError("Usuário não autenticado.", 401);
+            }
+            const setores = await usuariosService.listarSetoresPorUsuario(requester.id);
+            success<string[]>(res, setores, 200);
+        } catch (error) {
+            next(error);
+        }
+    },
+
     /**
      * Handler: GET /users — Consulta paginada de usuários.
      *
@@ -150,8 +167,15 @@ export const usersController = {
     ): Promise<void> {
         try {
             const dto = validatedBody<CreateUserDTO>(req);
+            const requester = (req as AuthRequest).user;
+            if (
+                dto.classificacao === "sakai" &&
+                requester?.classificacao?.trim().toLowerCase() !== "sakai"
+            ) {
+                throw new AppError("Apenas um superadministrador pode criar outro superadministrador.", 403);
+            }
             const usuario = await usuariosService.criar(dto);
-            created<Usuario>(res, usuario, 201);
+            created<UsuarioCriado>(res, usuario, 201);
         } catch (error) {
             next(error);
         }
@@ -182,6 +206,19 @@ export const usersController = {
             const params = validatedParams<UserIdParams>(req);
             const dto = validatedBody<UpdateUserDTO>(req);
             const id = params.id;
+            const requester = (req as AuthRequest).user;
+            if (
+                requester?.id === id &&
+                ("classificacao" in dto || "ativo" in dto)
+            ) {
+                throw new AppError(
+                    "Para alterar o próprio perfil ou status, solicite a um administrador.",
+                    403
+                );
+            }
+            if (dto.classificacao === "sakai" && requester?.classificacao !== "sakai") {
+                throw new AppError("Somente um superadministrador pode atribuir o perfil Sakai.", 403);
+            }
             const usuario = await usuariosService.atualizar(id, dto);
             success<Usuario>(res, usuario, 200);
         } catch (error) {
@@ -272,6 +309,21 @@ export const usersController = {
             const dto = validatedBody<UpdateUserPasswordDTO>(req);
             const id = params.id;
             await usuariosService.atualizarSenha(id, dto);
+            noContent(res);
+        } catch (error) {
+            next(error);
+        }
+    },
+
+    async resetarSenha(
+        req: Request,
+        res: Response,
+        next: NextFunction
+    ): Promise<void> {
+        try {
+            const params = validatedParams<UserIdParams>(req);
+            const dto = validatedBody<ResetUserPasswordDTO>(req);
+            await usuariosService.resetarSenha(params.id, dto.nova_senha);
             noContent(res);
         } catch (error) {
             next(error);

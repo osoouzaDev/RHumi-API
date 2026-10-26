@@ -8,18 +8,13 @@
  *   - Serializa a resposta usando os helpers de `shared/http/success`.
  *   - Propaga qualquer `AppError` ou erro inesperado via `next(error)` para o
  *     middleware global `errorHandler`.
- *
- * BUG corrigido (antes usava `req.cookies` sem middleware `cookie-parser`):
- *   - O Express não disponibiliza `req.cookies` por padrão; é necessário o
- *     pacote `cookie-parser`. Para evitar dependência extra, realizamos o
- *     parse MANUAL do header `Cookie` (igual ao middleware de autenticação).
  */
 
 import type { Request, Response, NextFunction } from "express";
 import { authService } from "./service.js";
 import { success, noContent, fail } from "../../shared/http/success.js";
 import { validatedBody } from "../../middlewares/validate.js";
-import type { LoginDTO, RefreshTokenDTO, TokenResponse } from "./dto.js";
+import type { LoginDTO, LoginCodigoDTO, RefreshTokenDTO, TokenResponse } from "./dto.js";
 import { env } from "../../config/env.js";
 import type { AuthRequest, TokenPayload } from "../../middlewares/auth.js";
 
@@ -53,8 +48,7 @@ function extrairCookies(req: Request): Record<string, string> {
 
 /**
  * Injetor de cookies de autenticação (HTTP-only). Só atua quando
- * `env.authCookiesEnabled === true`. Atributos padrão: `httpOnly`, `secure`,
- * `sameSite` (conforme .env) — previne XSS e CSRF.
+ * `env.authCookiesEnabled === true`.
  */
 function aplicarCookiesTokens(res: Response, token: TokenResponse): void {
     if (!env.authCookiesEnabled) return;
@@ -81,8 +75,6 @@ function aplicarCookiesTokens(res: Response, token: TokenResponse): void {
 
 /**
  * Remove os cookies de autenticação do cliente (chamado no logout).
- * Importante: repassar os mesmos `domain` da criação, senão o browser
- * não consegue casar o cookie e mantém o valor antigo.
  */
 function limparCookiesAuth(res: Response): void {
     const domain = env.authCookieDomain ? { domain: env.authCookieDomain } : {};
@@ -93,7 +85,7 @@ function limparCookiesAuth(res: Response): void {
 export const authController = {
     /**
      * `POST /api/auth/login`
-     * Valida credenciais → emite tokens → opcionalmente injeta cookies.
+     * Valida credenciais (e-mail e senha OU código do colaborador) → emite tokens.
      */
     async login(
         req: Request,
@@ -111,12 +103,27 @@ export const authController = {
     },
 
     /**
+     * `POST /api/auth/login/codigo`
+     * Endpoint dedicado para login por código do colaborador.
+     */
+    async loginCodigo(
+        req: Request,
+        res: Response,
+        next: NextFunction
+    ): Promise<void> {
+        try {
+            const dto = validatedBody<LoginCodigoDTO>(req);
+            const token = await authService.autenticarPorCodigo(dto);
+            aplicarCookiesTokens(res, token);
+            success(res, token, 200);
+        } catch (error) {
+            next(error);
+        }
+    },
+
+    /**
      * `POST /api/auth/refresh`
      * Recebe refresh token (1° body, 2° cookie) → devolve novo access token.
-     *
-     * BUG FIX: anteriormente usava `req.cookies[env.refreshTokenCookieName]`,
-     * mas o Express não define `req.cookies` sem `cookie-parser`; agora
-     * usamos `extrairCookies(req)`.
      */
     async refresh(
         req: Request,
@@ -141,7 +148,7 @@ export const authController = {
 
     /**
      * `POST /api/auth/logout`
-     * Notifica o service (stub de blacklist) e limpa cookies.
+     * Notifica o service e limpa cookies.
      */
     async logout(
         req: Request,
@@ -161,11 +168,7 @@ export const authController = {
 
     /**
      * `GET /api/auth/me`
-     * Retorna o payload `TokenPayload` do usuário autenticado (já anexado
-     * no `req.user` pelo middleware `autenticarToken`).
-     *
-     * BUG FIX: antes usava cast `req as unknown as { user?: unknown }`.
-     * Agora usa `AuthRequest` tipado e compara `TokenPayload`.
+     * Retorna o payload `TokenPayload` do usuário autenticado.
      */
     async eu(
         req: Request,

@@ -16,6 +16,17 @@
 import type { Response, NextFunction } from "express";
 import type { AuthRequest } from "./auth.js";
 
+const adminProfiles = new Set(["sakai", "admin", "hr_admin", "supervisor"]);
+
+export function isAdminOrSelf(
+    profile: string,
+    requesterId: string,
+    targetId: string
+): boolean {
+    return adminProfiles.has(profile.trim().toLowerCase()) ||
+        (Boolean(requesterId) && requesterId === targetId);
+}
+
 export function authAdmin(
     req: AuthRequest,
     res: Response,
@@ -26,14 +37,35 @@ export function authAdmin(
         return res.status(401).json({ message: "Usuário não autenticado." });
     }
 
-    const perfil = String(req.user.classificacao ?? "").trim().toLowerCase();
-    const perfisPermitidos = new Set(["sakai", "admin", "hr_admin", "supervisor"]);
+    const perfil = String(req.user.classificacao ?? "");
 
-    if (!perfisPermitidos.has(perfil)) {
+    if (!adminProfiles.has(perfil.trim().toLowerCase())) {
         return res.status(403).json({
             message: "Acesso negado. Apenas usuários administradores podem acessar este recurso."
         });
     }
 
     next();
+}
+
+export function authAdminOrSelf(
+    req: AuthRequest,
+    res: Response,
+    next: NextFunction
+): Response | void {
+    if (!req.user) {
+        return res.status(401).json({ message: "Usuário não autenticado." });
+    }
+
+    const perfil = String(req.user.classificacao ?? "");
+    const targetId = typeof req.params.id === "string" ? req.params.id : "";
+
+    if (isAdminOrSelf(perfil, req.user.id, targetId)) {
+        next();
+        return;
+    }
+
+    return res.status(403).json({
+        message: "Acesso negado. Você só pode editar seus próprios dados ou precisa de perfil administrador.",
+    });
 }

@@ -75,6 +75,36 @@ Resposta esperada:
 }
 ```
 
+### Entrar com código do colaborador
+
+O campo `codigo_colaborador` recebe uma string de exatamente quatro dígitos,
+incluindo zeros à esquerda quando houver:
+
+```bash
+curl -X POST http://localhost:8000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "codigo_colaborador": "0042"
+  }'
+```
+
+O código é gerado automaticamente para cada usuário criado e é incluído na
+resposta de `POST /api/usuarios`. Execute a migration
+`src/database/migrations/002_codigo_colaborador_usuario.sql` antes de usar o
+novo formato de login. Os códigos existentes também são preenchidos pela migration.
+O intervalo disponível é de `0000` a `9999`; códigos emitidos não são reutilizados,
+inclusive após a exclusão de um usuário.
+
+## Atualizar cadastro de colaborador
+
+O endpoint `PUT /api/usuarios/:id` atualiza parcialmente os dados da conta e do
+perfil profissional. Além de nome, e-mail, classificação e status, aceita
+`telefone`, `setor`, `cargo`, `tipo_contrato`, `data_admissao` (formato
+`AAAA-MM-DD`) e `descricao_cargo`. Para remover um dado opcional, envie `null`.
+
+Antes de permitir perfis sem tipo de contrato informado, execute a migration
+`src/database/migrations/003_colaborador_tipo_contrato_opcional.sql`.
+
 ## 5. Usar token na autenticação
 
 Após receber o `access_token`, envie no header:
