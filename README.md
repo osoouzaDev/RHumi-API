@@ -105,6 +105,17 @@ perfil profissional. Além de nome, e-mail, classificação e status, aceita
 Antes de permitir perfis sem tipo de contrato informado, execute a migration
 `src/database/migrations/003_colaborador_tipo_contrato_opcional.sql`.
 
+## Dados da empresa
+
+Antes de usar os campos de apresentação da empresa, execute a migration
+`src/database/migrations/006_dados_publicos_empresa.sql`. Configure
+`DEFAULT_EMPRESA_ID` com o UUID da empresa que a API deve gerenciar.
+
+- `GET /api/empresa`: retorna os dados cadastrais, setores, quantidade de colaboradores e classificações da empresa autenticada.
+- `PUT /api/empresa`: atualiza os dados cadastrais, a página de carreiras e a cultura organizacional; requer perfil administrador.
+- `POST /api/empresa/setores`: adiciona um setor; requer perfil administrador.
+- `DELETE /api/empresa/setores/:id`: remove um setor sem colaboradores vinculados; requer perfil administrador.
+
 ## 5. Usar token na autenticação
 
 Após receber o `access_token`, envie no header:

@@ -19,6 +19,7 @@ import { corsOptions } from "./config/cors.js";
 import { globalLimiter } from "./config/rateLimit.js";
 import { errorHandler } from "./middlewares/errorHandler.js";
 import { authRouter } from "./routes/auth.js";
+import { companyRouter } from "./routes/company.js";
 import { healthRouter } from "./routes/health.js";
 import { reportsRouter } from "./routes/reports.js";
 import { usersRouter } from "./routes/users.js";
@@ -93,6 +94,7 @@ export function createApp(): express.Express {
     // Registra os módulos principais da API por domínio funcional.
     app.use(healthRouter);
     app.use(authRouter);
+    app.use(companyRouter);
     app.use(usersRouter);
     app.use(reportsRouter);
 
