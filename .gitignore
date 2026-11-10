@@ -1,5 +1,15 @@
 node_modules
-.env
 dist
+coverage
+*.tsbuildinfo
+*.log
+npm-debug.log*
+
+# Segredos e configurações locais
+.env
+.env.*
+!.env.example
+
+# Certificados e chaves
 certs
 *.pem
