@@ -22,6 +22,8 @@ import { authRouter } from "./routes/auth.js";
 import { companyRouter } from "./routes/company.js";
 import { healthRouter } from "./routes/health.js";
 import { reportsRouter } from "./routes/reports.js";
+import { journeysRouter } from "./routes/journeys.js";
+import { recruitmentRouter } from "./routes/recruitment.js";
 import { usersRouter } from "./routes/users.js";
 import { attachRequestId, type RequestWithId } from "./utils/request.js";
 
@@ -96,6 +98,8 @@ export function createApp(): express.Express {
     app.use(authRouter);
     app.use(companyRouter);
     app.use(usersRouter);
+    app.use(journeysRouter);
+    app.use(recruitmentRouter);
     app.use(reportsRouter);
 
     // Middleware final de tratamento de erros, sempre funcionando como última etapa da pipeline.

@@ -25,6 +25,10 @@ import { authService } from "../src/modules/auth/service.js";
 import { usuariosRepositorio } from "../src/modules/users/repository.js";
 import { env } from "../src/config/env.js";
 import { AppError } from "../src/shared/errors/app-error.js";
+import {
+    candidateApplicationSchema,
+    candidateRegistrationSchema,
+} from "../src/modules/recruitment/dto.js";
 
 let totalTests = 0;
 let passedTests = 0;
@@ -162,6 +166,44 @@ async function main() {
             descricao_cargo: "Responsável por suporte técnico.",
         });
         assert.equal(result.success, true);
+    });
+
+    await runTest("candidateRegistrationSchema valida cadastro público de candidato", () => {
+        const result = candidateRegistrationSchema.safeParse({
+            nome: "Ana Silva",
+            email: "ana@example.com",
+            telefone: null,
+            senha: "senha-segura-123",
+        });
+        assert.equal(result.success, true);
+    });
+
+    await runTest("candidateRegistrationSchema rejeita campos internos de perfil ou código", () => {
+        const result = candidateRegistrationSchema.safeParse({
+            nome: "Ana Silva",
+            email: "ana@example.com",
+            telefone: null,
+            senha: "senha-segura-123",
+            classificacao: "admin",
+        });
+        assert.equal(result.success, false);
+        assert.equal(candidateRegistrationSchema.safeParse({
+            nome: "Ana Silva",
+            email: "ana@example.com",
+            telefone: null,
+            senha: "senha-segura-123",
+            codigo_colaborador: "0042",
+        }).success, false);
+    });
+
+    await runTest("candidateApplicationSchema aceita identificador de vaga UUID", () => {
+        assert.equal(
+            candidateApplicationSchema.safeParse({
+                id_vaga: "67e55044-10b1-426f-9247-bb680e5fe0c8",
+            }).success,
+            true,
+        );
+        assert.equal(candidateApplicationSchema.safeParse({ id_vaga: "1" }).success, false);
     });
 
     await runTest("resetUserPasswordSchema exige senha com pelo menos 8 caracteres", () => {

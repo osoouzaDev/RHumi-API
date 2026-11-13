@@ -48,6 +48,24 @@ export function authAdmin(
     next();
 }
 
+export function authCandidate(
+    req: AuthRequest,
+    res: Response,
+    next: NextFunction
+): Response | void {
+    if (!req.user) {
+        return res.status(401).json({ message: "Usuário não autenticado." });
+    }
+
+    if (req.user.classificacao.trim().toUpperCase() !== "CANDIDATE") {
+        return res.status(403).json({
+            message: "Acesso permitido somente para contas de candidato.",
+        });
+    }
+
+    next();
+}
+
 export function authAdminOrSelf(
     req: AuthRequest,
     res: Response,

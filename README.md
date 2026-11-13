@@ -88,10 +88,13 @@ curl -X POST http://localhost:8000/api/auth/login \
   }'
 ```
 
-O código é gerado automaticamente para cada usuário criado e é incluído na
-resposta de `POST /api/usuarios`. Execute a migration
+O código é gerado automaticamente para usuários colaboradores e é incluído na
+resposta de `POST /api/usuarios`. Contas com perfil `CANDIDATE` não recebem esse
+código e entram usando e-mail e senha. Execute as migrations
 `src/database/migrations/002_codigo_colaborador_usuario.sql` antes de usar o
-novo formato de login. Os códigos existentes também são preenchidos pela migration.
+novo formato de login e
+`src/database/migrations/008_codigo_colaborador_opcional_candidato.sql` para
+permitir contas de candidatos sem código. Os códigos existentes também são preenchidos pela migration 002.
 O intervalo disponível é de `0000` a `9999`; códigos emitidos não são reutilizados,
 inclusive após a exclusão de um usuário.
 
@@ -115,6 +118,23 @@ Antes de usar os campos de apresentação da empresa, execute a migration
 - `PUT /api/empresa`: atualiza os dados cadastrais, a página de carreiras e a cultura organizacional; requer perfil administrador.
 - `POST /api/empresa/setores`: adiciona um setor; requer perfil administrador.
 - `DELETE /api/empresa/setores/:id`: remove um setor sem colaboradores vinculados; requer perfil administrador.
+
+## Jornadas e recrutamento
+
+Antes de usar as telas de jornada e recrutamento, execute a migration
+`src/database/migrations/007_jornadas_recrutamento.sql` no banco configurado
+para a API. Ela mantém as tabelas existentes `jornada_tarefa`, `vaga` e
+`candidatura`; apenas permite candidaturas sem conta e adiciona os campos de
+contato do candidato. Configure também `DEFAULT_EMPRESA_ID` com o UUID da empresa.
+
+- `GET /api/jornadas`: lista os colaboradores ativos e suas etapas de integração; requer autenticação.
+- `PATCH /api/jornadas/:usuarioId/etapas/:etapaKey/tarefas/:tarefaKey`: atualiza uma tarefa; requer perfil administrador.
+- `DELETE /api/jornadas/:usuarioId/etapas/:etapaKey`: reabre uma etapa; requer perfil administrador.
+- `/api/recrutamento/vagas`: lista, cria e atualiza o status das vagas; requer perfil administrador.
+- `GET /api/recrutamento/candidaturas` e `PATCH /api/recrutamento/candidaturas/:id/status`: lista candidaturas e atualiza status; requer perfil administrador.
+- `GET /api/public/vagas`: lista as vagas abertas da empresa sem exigir autenticação.
+- `POST /api/public/candidatos`: cria uma conta de candidato e retorna os tokens de sessão; o perfil `CANDIDATE` é definido pela API.
+- `GET /api/candidato/candidaturas` e `POST /api/candidato/candidaturas`: consultam e registram candidaturas para o candidato autenticado.
 
 ## 5. Usar token na autenticação
 
