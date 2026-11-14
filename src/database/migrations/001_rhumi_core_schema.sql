@@ -193,7 +193,7 @@ CREATE TABLE IF NOT EXISTS treinamento (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_tratamento_setor ON tratamento (id_setor);
+CREATE INDEX IF NOT EXISTS idx_treinamento_setor ON treinamento (id_setor);
 
 -- ===============================================================
 -- 8) Eventos e público-alvo
@@ -331,10 +331,10 @@ BEGIN
     IF NOT EXISTS (
         SELECT 1
         FROM pg_trigger
-        WHERE tgname = 'trg_tratamento_updated_at'
+        WHERE tgname = 'trg_treinamento_updated_at'
     ) THEN
-        CREATE TRIGGER trg_tratamento_updated_at
-        BEFORE UPDATE ON tratamento
+        CREATE TRIGGER trg_treinamento_updated_at
+        BEFORE UPDATE ON treinamento
         FOR EACH ROW EXECUTE FUNCTION atualizar_updated_at();
     END IF;
 
@@ -361,6 +361,6 @@ COMMENT ON TABLE usuario_colaborador IS 'Dados cadastrais do colaborador/usuári
 COMMENT ON TABLE contrato_trabalho IS 'Histórico e vigência de contratos do colaborador.';
 COMMENT ON TABLE historico_setor IS 'Histórico de movimentação entre setores.';
 COMMENT ON TABLE historico_cargo IS 'Histórico de cargos e promoções.';
-COMMENT ON TABLE tratamento IS 'Treinamentos, materiais, conteúdos e recursos de acompanhamento.';
+COMMENT ON TABLE treinamento IS 'Treinamentos, materiais, conteúdos e recursos de acompanhamento.';
 COMMENT ON TABLE evento IS 'Eventos da empresa e públicos-alvo.';
 COMMENT ON TABLE auditoria IS 'Registro de ações sensíveis para compliance e rastreabilidade.';

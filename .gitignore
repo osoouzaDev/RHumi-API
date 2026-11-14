@@ -13,3 +13,4 @@ npm-debug.log*
 # Certificados e chaves
 certs
 *.pem
+storage/training-pdfs/

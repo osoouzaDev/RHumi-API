@@ -24,6 +24,7 @@ import { healthRouter } from "./routes/health.js";
 import { recruitmentRouter } from "./routes/recruitment.js";
 import { reportsRouter } from "./routes/reports.js";
 import { usersRouter } from "./routes/users.js";
+import { learningRouter } from "./routes/learning.js";
 import { attachRequestId, type RequestWithId } from "./utils/request.js";
 
 declare global {
@@ -68,6 +69,7 @@ export function createApp(): express.Express {
     app.use(authRouter);
     app.use(companyRouter);
     app.use(usersRouter);
+    app.use(learningRouter);
     app.use(recruitmentRouter);
     app.use(reportsRouter);
     app.use(errorHandler);

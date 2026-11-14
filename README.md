@@ -135,6 +135,34 @@ Os tipos de contrato e etapas aceitos correspondem aos valores definidos nas
 restrições das tabelas de recrutamento. O cadastro de candidato grava/atualiza
 seus dados em `candidato` e cria a relação com a vaga em `candidatura`.
 
+## Treinamentos e avaliações
+
+Execute `src/database/migrations/009_treinamentos_avaliacoes.sql` depois da
+migration inicial e `src/database/migrations/010_prova_treinamento.sql` para
+habilitar a prova opcional associada ao treinamento. Execute também
+`src/database/migrations/011_exclusao_cascade_resultados.sql` para permitir a
+exclusão confirmada de conteúdos com resultados vinculados. A migration 009
+preserva os treinamentos existentes e associa os setores já cadastrados.
+Configure `DEFAULT_EMPRESA_ID`.
+
+Anexos PDF são limitados a 10 MiB e armazenados fora de uma rota pública. O
+padrão é `./storage/training-pdfs`; configure `TRAINING_PDF_DIR` para apontar
+para um volume persistente no ambiente de produção.
+
+- `GET /api/capacitacoes`: lista conteúdos de gerenciamento para administradores; para colaboradores, retorna somente conteúdos ativos destinados ao setor atual e omite as respostas corretas.
+- `POST /api/capacitacoes` e `PUT /api/capacitacoes/:id`: criam e editam treinamentos/avaliações; requer perfil administrador. Para PDF anexado, envie o campo `pdf` em `multipart/form-data`.
+- `PATCH /api/capacitacoes/:id/status`: ativa ou desativa um conteúdo; requer perfil administrador.
+- `DELETE /api/capacitacoes/:id`: exclui o conteúdo e, quando `apagar_resultados: true` for explicitamente confirmado, também remove permanentemente suas tentativas e resultados.
+- `GET /api/capacitacoes/:id/pdf`: visualiza o anexo após validar empresa e destino setorial.
+- `GET /api/capacitacoes/:id/resultados`: consulta o histórico de tentativas; requer perfil administrador.
+- `POST /api/capacitacoes/:id/respostas`: recebe a avaliação do colaborador autenticado, corrige no servidor e retorna a quantidade de acertos.
+
+Cada avaliação permite uma tentativa por colaborador. A pontuação é a contagem
+de respostas corretas; perguntas, alternativas, respostas e resultados enviados
+são preservados em um snapshot histórico quando o conteúdo é editado. A prova
+opcional do treinamento usa nota mínima configurável (padrão de 70%); o limiar
+e a aprovação ficam registrados junto com cada tentativa.
+
 ## 5. Usar token na autenticação
 
 Após receber o `access_token`, envie no header:
