@@ -186,7 +186,7 @@ export interface Usuario {
 }
 
 export interface UsuarioCriado extends Usuario {
-    codigo_colaborador: string;
+    codigo_colaborador: string | null;
 }
 
 /**
