@@ -1,25 +1,51 @@
+import type { PoolClient } from "pg";
 import { banco } from "../../database/connection.js";
 import { AppError } from "../../shared/errors/app-error.js";
 import type {
-    CandidateApplicationDTO,
+    ApplicationStatus,
+    CreateCandidateApplicationDTO,
     CreateVacancyDTO,
-    UpdateApplicationStatusDTO,
-    UpdateVacancyStatusDTO,
+    VacancyStatus,
 } from "./dto.js";
 
-function companyId(): string {
-    const id = process.env.DEFAULT_EMPRESA_ID?.trim();
-    if (!id) {
-        throw new AppError("DEFAULT_EMPRESA_ID não está configurada.", 500);
+export interface VacancyRecord {
+    id: string;
+    titulo: string;
+    setor: string;
+    localidade: string | null;
+    tipo_contrato: string;
+    descricao: string | null;
+    status: VacancyStatus;
+    created_at: string;
+}
+
+export interface CandidateApplicationRecord {
+    id: string;
+    id_candidato: string;
+    nome: string;
+    email: string;
+    telefone: string | null;
+    id_vaga: string;
+    vaga_titulo: string;
+    status: ApplicationStatus;
+    created_at: string;
+}
+
+async function resolveCompanyId(userId: string): Promise<string> {
+    const result = await banco.query(
+        `SELECT id_empresa::text AS id_empresa
+         FROM usuario
+         WHERE id = $1 AND ativo = TRUE`,
+        [userId]
+    );
+    const companyId = result.rows[0]?.id_empresa;
+    if (!companyId) {
+        throw new AppError("Empresa do usuário autenticado não encontrada.", 404);
     }
-    return id;
+    return String(companyId);
 }
 
-function timestamp(value: unknown): string {
-    return value instanceof Date ? value.toISOString() : String(value ?? "");
-}
-
-function vacancyFromRow(row: Record<string, unknown>) {
+function vacancyFromRow(row: Record<string, unknown>): VacancyRecord {
     return {
         id: String(row.id),
         titulo: String(row.titulo),
@@ -27,80 +53,87 @@ function vacancyFromRow(row: Record<string, unknown>) {
         localidade: row.localidade == null ? null : String(row.localidade),
         tipo_contrato: String(row.tipo_contrato),
         descricao: row.descricao == null ? null : String(row.descricao),
-        status: String(row.status),
-        created_at: timestamp(row.created_at),
+        status: String(row.status) as VacancyStatus,
+        created_at: new Date(row.created_at as string).toISOString(),
     };
 }
 
-function applicationFromRow(row: Record<string, unknown>) {
+function applicationFromRow(row: Record<string, unknown>): CandidateApplicationRecord {
     return {
         id: String(row.id),
-        id_candidato: String(row.id),
+        id_candidato: String(row.id_candidato),
         nome: String(row.nome),
         email: String(row.email),
         telefone: row.telefone == null ? null : String(row.telefone),
         id_vaga: String(row.id_vaga),
         vaga_titulo: String(row.vaga_titulo),
-        status: String(row.status),
-        created_at: timestamp(row.created_at),
+        status: String(row.status) as ApplicationStatus,
+        created_at: new Date(row.created_at as string).toISOString(),
     };
 }
 
-const vacancyColumns = `id::text AS id, titulo, setor, localidade, tipo_contrato,
-                        descricao, status, created_at`;
+async function findApplication(client: PoolClient, companyId: string, applicationId: string): Promise<CandidateApplicationRecord> {
+    const result = await client.query(
+        `SELECT ca.id::text AS id, ca.id_candidato::text AS id_candidato,
+                c.nome, c.email, c.telefone, ca.id_vaga::text AS id_vaga,
+                v.titulo AS vaga_titulo, ca.status, ca.created_at
+         FROM candidatura ca
+         JOIN candidato c ON c.id = ca.id_candidato AND c.id_empresa = ca.id_empresa
+         JOIN vaga v ON v.id = ca.id_vaga AND v.id_empresa = ca.id_empresa
+         WHERE ca.id_empresa = $1 AND ca.id = $2`,
+        [companyId, applicationId]
+    );
+    if (!result.rows[0]) {
+        throw new AppError("Candidatura não encontrada.", 404);
+    }
+    return applicationFromRow(result.rows[0]);
+}
 
 export const recruitmentRepository = {
-    async listarVagas() {
+    async listVacancies(userId: string): Promise<VacancyRecord[]> {
+        const companyId = await resolveCompanyId(userId);
         const result = await banco.query(
-            `SELECT ${vacancyColumns}
+            `SELECT id::text AS id, titulo, setor, localidade, tipo_contrato,
+                    descricao, status, created_at
              FROM vaga
              WHERE id_empresa = $1
-             ORDER BY created_at DESC`,
-            [companyId()],
+             ORDER BY created_at DESC, titulo`,
+            [companyId]
         );
         return result.rows.map(vacancyFromRow);
     },
 
-    async criarVaga(data: CreateVacancyDTO) {
+    async createVacancy(userId: string, data: CreateVacancyDTO): Promise<VacancyRecord> {
+        const companyId = await resolveCompanyId(userId);
         const result = await banco.query(
-            `INSERT INTO vaga
-                 (id_empresa, titulo, setor, localidade, tipo_contrato, descricao)
+            `INSERT INTO vaga (id_empresa, titulo, setor, localidade, tipo_contrato, descricao)
              VALUES ($1, $2, $3, $4, $5, $6)
-             RETURNING ${vacancyColumns}`,
+             RETURNING id::text AS id, titulo, setor, localidade, tipo_contrato,
+                       descricao, status, created_at`,
             [
-                companyId(),
+                companyId,
                 data.titulo,
                 data.setor,
                 data.localidade || null,
                 data.tipo_contrato,
-                data.descricao ?? null,
-            ],
+                data.descricao || null,
+            ]
         );
-        const row = result.rows[0];
-        if (!row) {
-            throw new AppError("Não foi possível criar a vaga.", 500);
+        if (!result.rows[0]) {
+            throw new AppError("Não foi possível salvar a vaga.", 500);
         }
-        return vacancyFromRow(row);
+        return vacancyFromRow(result.rows[0]);
     },
 
-    async listarVagasPublicas() {
-        const result = await banco.query(
-            `SELECT ${vacancyColumns}
-             FROM vaga
-             WHERE id_empresa = $1 AND status = 'ABERTA'
-             ORDER BY created_at DESC`,
-            [companyId()],
-        );
-        return result.rows.map(vacancyFromRow);
-    },
-
-    async atualizarStatusVaga(id: string, data: UpdateVacancyStatusDTO) {
+    async updateVacancyStatus(userId: string, vacancyId: string, status: VacancyStatus): Promise<VacancyRecord> {
+        const companyId = await resolveCompanyId(userId);
         const result = await banco.query(
             `UPDATE vaga
              SET status = $3, updated_at = NOW()
              WHERE id = $1 AND id_empresa = $2
-             RETURNING ${vacancyColumns}`,
-            [id, companyId(), data.status],
+             RETURNING id::text AS id, titulo, setor, localidade, tipo_contrato,
+                       descricao, status, created_at`,
+            [vacancyId, companyId, status]
         );
         if (!result.rows[0]) {
             throw new AppError("Vaga não encontrada.", 404);
@@ -108,119 +141,115 @@ export const recruitmentRepository = {
         return vacancyFromRow(result.rows[0]);
     },
 
-    async listarCandidaturas() {
+    async listApplications(userId: string): Promise<CandidateApplicationRecord[]> {
+        const companyId = await resolveCompanyId(userId);
         const result = await banco.query(
-            `SELECT candidatura.id::text AS id,
-                    COALESCE(candidatura.nome, usuario.nome) AS nome,
-                    COALESCE(candidatura.email, usuario.email) AS email,
-                    candidatura.telefone, candidatura.id_vaga::text AS id_vaga,
-                    vaga.titulo AS vaga_titulo, candidatura.status, candidatura.created_at
-             FROM candidatura
-             JOIN vaga ON vaga.id = candidatura.id_vaga
-                       AND vaga.id_empresa = candidatura.id_empresa
-             LEFT JOIN usuario ON usuario.id = candidatura.id_usuario
-                              AND usuario.id_empresa = candidatura.id_empresa
-             WHERE candidatura.id_empresa = $1
-             ORDER BY candidatura.created_at DESC`,
-            [companyId()],
+            `SELECT ca.id::text AS id, ca.id_candidato::text AS id_candidato,
+                    c.nome, c.email, c.telefone, ca.id_vaga::text AS id_vaga,
+                    v.titulo AS vaga_titulo, ca.status, ca.created_at
+             FROM candidatura ca
+             JOIN candidato c ON c.id = ca.id_candidato AND c.id_empresa = ca.id_empresa
+             JOIN vaga v ON v.id = ca.id_vaga AND v.id_empresa = ca.id_empresa
+             WHERE ca.id_empresa = $1
+             ORDER BY ca.created_at DESC, c.nome`,
+            [companyId]
         );
         return result.rows.map(applicationFromRow);
     },
 
-    async atualizarStatusCandidatura(id: string, data: UpdateApplicationStatusDTO) {
-        const result = await banco.query(
-            `UPDATE candidatura
-             SET status = $3, updated_at = NOW()
-             FROM vaga
-             WHERE candidatura.id = $1
-               AND candidatura.id_empresa = $2
-               AND vaga.id = candidatura.id_vaga
-               AND vaga.id_empresa = candidatura.id_empresa
-             RETURNING candidatura.id::text AS id,
-                       COALESCE(candidatura.nome, (
-                           SELECT usuario.nome FROM usuario
-                           WHERE usuario.id = candidatura.id_usuario
-                       )) AS nome,
-                       COALESCE(candidatura.email, (
-                           SELECT usuario.email FROM usuario
-                           WHERE usuario.id = candidatura.id_usuario
-                       )) AS email,
-                       candidatura.telefone,
-                       candidatura.id_vaga::text AS id_vaga, vaga.titulo AS vaga_titulo,
-                       candidatura.status, candidatura.created_at`,
-            [id, companyId(), data.status],
-        );
-        if (!result.rows[0]) {
-            throw new AppError("Candidatura não encontrada.", 404);
-        }
-        return applicationFromRow(result.rows[0]);
-    },
-
-    async listarCandidaturasDoCandidato(usuarioId: string) {
-        const result = await banco.query(
-            `SELECT candidatura.id::text AS id, candidatura.id::text AS id_candidato,
-                    candidatura.nome, candidatura.email, candidatura.telefone,
-                    candidatura.id_vaga::text AS id_vaga, vaga.titulo AS vaga_titulo,
-                    candidatura.status, candidatura.created_at
-             FROM candidatura
-             JOIN vaga ON vaga.id = candidatura.id_vaga
-                       AND vaga.id_empresa = candidatura.id_empresa
-             WHERE candidatura.id_empresa = $1 AND candidatura.id_usuario = $2
-             ORDER BY candidatura.created_at DESC`,
-            [companyId(), usuarioId],
-        );
-        return result.rows.map(applicationFromRow);
-    },
-
-    async candidatarComoUsuario(usuarioId: string, data: CandidateApplicationDTO) {
-        const idEmpresa = companyId();
-        let result;
+    async createApplication(userId: string, data: CreateCandidateApplicationDTO): Promise<CandidateApplicationRecord> {
+        const companyId = await resolveCompanyId(userId);
+        const client = await banco.getClient();
         try {
-            result = await banco.query(
-                `INSERT INTO candidatura
-                     (id_empresa, id_vaga, id_usuario, nome, email, telefone, origem)
-                 SELECT usuario.id_empresa, vaga.id, usuario.id, usuario.nome, usuario.email,
-                        COALESCE(colaborador.telefone, usuario.telefone), 'Site'
-                 FROM usuario
-                 JOIN usuario_colaborador colaborador
-                   ON colaborador.id_usuario = usuario.id
-                  AND colaborador.id_empresa = usuario.id_empresa
-                  AND UPPER(colaborador.classificacao) = 'CANDIDATE'
-                 JOIN vaga ON vaga.id = $2
-                           AND vaga.id_empresa = usuario.id_empresa
-                           AND vaga.status = 'ABERTA'
-                 WHERE usuario.id = $1
-                   AND usuario.id_empresa = $3
-                   AND usuario.ativo = TRUE
-                 RETURNING id::text AS id, id::text AS id_candidato, nome, email, telefone,
-                           id_vaga::text AS id_vaga, status, created_at`,
-                [usuarioId, data.id_vaga, idEmpresa],
-            );
-        } catch (error: unknown) {
-            if (
-                error && typeof error === "object" &&
-                "code" in error && error.code === "23505"
-            ) {
-                throw new AppError("Você já se candidatou a esta vaga.", 409);
-            }
-            throw error;
-        }
-        const row = result.rows[0];
-        if (!row) {
-            const vacancyResult = await banco.query(
-                `SELECT 1 FROM vaga WHERE id = $1 AND id_empresa = $2 AND status = 'ABERTA'`,
-                [data.id_vaga, idEmpresa],
+            await client.query("BEGIN");
+            const vacancyResult = await client.query(
+                `SELECT id
+                 FROM vaga
+                 WHERE id = $1 AND id_empresa = $2 AND status = 'ABERTA'
+                 FOR SHARE`,
+                [data.id_vaga, companyId]
             );
             if (!vacancyResult.rows[0]) {
-                throw new AppError("Esta vaga não está mais disponível.", 404);
+                throw new AppError("A vaga selecionada não existe ou não está aberta.", 404);
             }
-            throw new AppError("Não foi possível validar a conta de candidato.", 403);
-        }
 
-        const vacancyResult = await banco.query(
-            `SELECT titulo FROM vaga WHERE id = $1 AND id_empresa = $2`,
-            [data.id_vaga, idEmpresa],
-        );
-        return applicationFromRow({ ...row, vaga_titulo: vacancyResult.rows[0]?.titulo });
+            const candidateResult = await client.query(
+                `INSERT INTO candidato (id_empresa, nome, email, telefone)
+                 VALUES ($1, $2, $3, $4)
+                 ON CONFLICT (id_empresa, email)
+                 DO UPDATE SET nome = EXCLUDED.nome,
+                               telefone = COALESCE(EXCLUDED.telefone, candidato.telefone),
+                               updated_at = NOW()
+                 RETURNING id::text AS id`,
+                [companyId, data.nome, data.email, data.telefone || null]
+            );
+            const candidateRecord = candidateResult.rows[0];
+            if (!candidateRecord?.id) {
+                throw new AppError("Não foi possível salvar os dados do candidato.", 500);
+            }
+            const candidateId = String(candidateRecord.id);
+            const applicationResult = await client.query(
+                `INSERT INTO candidatura (id_empresa, id_vaga, id_candidato)
+                 VALUES ($1, $2, $3)
+                 ON CONFLICT (id_vaga, id_candidato) DO NOTHING
+                 RETURNING id::text AS id`,
+                [companyId, data.id_vaga, candidateId]
+            );
+
+            let applicationId = applicationResult.rows[0]?.id
+                ? String(applicationResult.rows[0].id)
+                : "";
+            if (!applicationId) {
+                const existingApplication = await client.query(
+                    `SELECT id::text AS id FROM candidatura
+                     WHERE id_empresa = $1 AND id_vaga = $2 AND id_candidato = $3`,
+                    [companyId, data.id_vaga, candidateId]
+                );
+                const existingApplicationId = existingApplication.rows[0]?.id;
+                if (!existingApplicationId) {
+                    throw new AppError("Não foi possível salvar a candidatura.", 500);
+                }
+                applicationId = String(existingApplicationId);
+            }
+
+            const application = await findApplication(client, companyId, applicationId);
+            await client.query("COMMIT");
+            return application;
+        } catch (error) {
+            await client.query("ROLLBACK");
+            throw error;
+        } finally {
+            client.release();
+        }
+    },
+
+    async updateApplicationStatus(
+        userId: string,
+        applicationId: string,
+        status: ApplicationStatus
+    ): Promise<CandidateApplicationRecord> {
+        const companyId = await resolveCompanyId(userId);
+        const client = await banco.getClient();
+        try {
+            await client.query("BEGIN");
+            const result = await client.query(
+                `UPDATE candidatura
+                 SET status = $3, updated_at = NOW()
+                 WHERE id = $1 AND id_empresa = $2
+                 RETURNING id::text AS id`,
+                [applicationId, companyId, status]
+            );
+            if (!result.rows[0]) {
+                throw new AppError("Candidatura não encontrada.", 404);
+            }
+            const application = await findApplication(client, companyId, applicationId);
+            await client.query("COMMIT");
+            return application;
+        } catch (error) {
+            await client.query("ROLLBACK");
+            throw error;
+        } finally {
+            client.release();
+        }
     },
 };

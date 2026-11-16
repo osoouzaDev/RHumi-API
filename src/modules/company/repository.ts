@@ -179,6 +179,12 @@ export const companyRepository = {
                    SELECT 1 FROM usuario_colaborador uc
                    WHERE uc.id_setor = s.id AND uc.id_empresa = s.id_empresa
                )
+               AND NOT EXISTS (
+                   SELECT 1
+                   FROM public.rh_conteudo_setor cs
+                   JOIN public.rh_conteudo conteudo ON conteudo.id = cs.id_conteudo
+                   WHERE cs.id_setor = s.id AND conteudo.id_empresa = s.id_empresa
+               )
              RETURNING s.id`,
             [id, companyId()]
         );
@@ -192,6 +198,6 @@ export const companyRepository = {
         if (!sectorResult.rows[0]?.exists) {
             throw new AppError("Setor não encontrado.", 404);
         }
-        throw new AppError("Não é possível remover um setor que possui colaboradores vinculados.", 409);
+        throw new AppError("Não é possível remover um setor vinculado a colaboradores ou conteúdos.", 409);
     },
 };

@@ -14,28 +14,34 @@
  */
 
 import type { CorsOptions } from "cors";
+import { env } from "./env.js";
 
 /**
- * Origens padrão sempre permitidas — Website Angular (4200) e React/Next (3000/3001).
+ * Origens locais liberadas apenas durante o desenvolvimento.
  */
-const defaultAllowOrigins = [
-    "http://localhost:4200",
-    "http://127.0.0.1:4200",
-    "http://localhost:3000",
-    "http://localhost:3001",
-    "http://127.0.0.1:3000",
-    "http://127.0.0.1:3001",
-];
+const defaultAllowOrigins = env.isProduction
+    ? []
+    : [
+        "http://localhost:4200",
+        "http://127.0.0.1:4200",
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:3001",
+    ];
 
 /**
- * Origens lidas da variável `CORS_ALLOWED_ORIGINS`.
- * Exemplo de valor: "http://localhost:4200,https://app.rhumi.com.br"
+ * Origens configuradas no ambiente. `CORS_ORIGIN` também é aceito para
+ * compatibilidade com o nome usado pelo branch kauaDev.
  */
-const envAllowOrigins = process.env.CORS_ALLOWED_ORIGINS
-    ? process.env.CORS_ALLOWED_ORIGINS.split(",")
-        .map((origin) => origin.trim())
-        .filter(Boolean)
-    : [];
+const envAllowOrigins = [
+    process.env.CORS_ALLOWED_ORIGINS,
+    process.env.CORS_ORIGIN,
+]
+    .filter((origins): origins is string => Boolean(origins))
+    .flatMap((origins) => origins.split(","))
+    .map((origin) => origin.trim())
+    .filter(Boolean);
 
 /**
  * Conjunto efetivo de origens permitidas, normalizadas e deduplicadas.
@@ -70,8 +76,7 @@ export const corsOptions: CorsOptions = {
             return callback(null, true);
         }
 
-        // Origem não permitida: não emite headers CORS (browser bloqueia)
-        return callback(null, false);
+        return callback(new Error(`Origem não permitida pelo CORS: ${origin}`));
     },
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept"],

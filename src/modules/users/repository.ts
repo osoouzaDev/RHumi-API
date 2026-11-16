@@ -336,10 +336,6 @@ export const usuariosRepositorio = {
         const client = await banco.getClient();
         try {
             await client.query("BEGIN");
-            await client.query(
-                "SELECT set_config('rhumi.classificacao', $1, TRUE)",
-                [dto.classificacao.toUpperCase()],
-            );
             let sectorId: string | null = null;
             if (dto.setor?.trim()) {
                 const sectorResult = await client.query(
@@ -405,9 +401,7 @@ export const usuariosRepositorio = {
                 login: dto.login,
                 nome: String(row.nome),
                 email: String(row.email),
-                codigo_colaborador: row.codigo_colaborador == null
-                    ? null
-                    : String(row.codigo_colaborador),
+                codigo_colaborador: String(row.codigo_colaborador),
                 classificacao: dto.classificacao,
                 ativo: Boolean(row.ativo),
                 data_criacao: new Date(row.data_criacao as string).toISOString(),

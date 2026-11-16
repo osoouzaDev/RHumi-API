@@ -19,16 +19,18 @@ import {
     updateUserSchema,
     resetUserPasswordSchema,
 } from "../src/modules/users/dto.js";
+import {
+    applicationStatusSchema,
+    createCandidateApplicationSchema,
+    createVacancySchema,
+    vacancyStatusSchema,
+} from "../src/modules/recruitment/dto.js";
 import { usuariosService } from "../src/modules/users/service.js";
 import { isAdminOrSelf } from "../src/middlewares/authAdmin.js";
 import { authService } from "../src/modules/auth/service.js";
 import { usuariosRepositorio } from "../src/modules/users/repository.js";
 import { env } from "../src/config/env.js";
 import { AppError } from "../src/shared/errors/app-error.js";
-import {
-    candidateApplicationSchema,
-    candidateRegistrationSchema,
-} from "../src/modules/recruitment/dto.js";
 
 let totalTests = 0;
 let passedTests = 0;
@@ -168,42 +170,46 @@ async function main() {
         assert.equal(result.success, true);
     });
 
-    await runTest("candidateRegistrationSchema valida cadastro público de candidato", () => {
-        const result = candidateRegistrationSchema.safeParse({
-            nome: "Ana Silva",
-            email: "ana@example.com",
-            telefone: null,
-            senha: "senha-segura-123",
+    await runTest("createVacancySchema aceita os tipos de contrato da tabela vaga", () => {
+        const result = createVacancySchema.safeParse({
+            titulo: "Analista de RH",
+            setor: "Pessoas",
+            localidade: "Remoto",
+            tipo_contrato: "CLT",
         });
         assert.equal(result.success, true);
     });
 
-    await runTest("candidateRegistrationSchema rejeita campos internos de perfil ou código", () => {
-        const result = candidateRegistrationSchema.safeParse({
-            nome: "Ana Silva",
-            email: "ana@example.com",
-            telefone: null,
-            senha: "senha-segura-123",
-            classificacao: "admin",
-        });
-        assert.equal(result.success, false);
-        assert.equal(candidateRegistrationSchema.safeParse({
-            nome: "Ana Silva",
-            email: "ana@example.com",
-            telefone: null,
-            senha: "senha-segura-123",
-            codigo_colaborador: "0042",
+    await runTest("createVacancySchema rejeita tipo de contrato inexistente", () => {
+        assert.equal(createVacancySchema.safeParse({
+            titulo: "Analista de RH",
+            setor: "Pessoas",
+            tipo_contrato: "Estágio",
         }).success, false);
     });
 
-    await runTest("candidateApplicationSchema aceita identificador de vaga UUID", () => {
-        assert.equal(
-            candidateApplicationSchema.safeParse({
-                id_vaga: "67e55044-10b1-426f-9247-bb680e5fe0c8",
-            }).success,
-            true,
-        );
-        assert.equal(candidateApplicationSchema.safeParse({ id_vaga: "1" }).success, false);
+    await runTest("createCandidateApplicationSchema normaliza e-mail e exige vaga UUID", () => {
+        const result = createCandidateApplicationSchema.safeParse({
+            nome: "Ana Silva",
+            email: "ANA@EXAMPLE.COM",
+            id_vaga: "82e6ad33-f876-44a5-bd2d-de167cc69faf",
+        });
+        assert.equal(result.success, true);
+        if (result.success) {
+            assert.equal(result.data.email, "ana@example.com");
+        }
+        assert.equal(createCandidateApplicationSchema.safeParse({
+            nome: "Ana Silva",
+            email: "ana@example.com",
+            id_vaga: "vaga-invalida",
+        }).success, false);
+    });
+
+    await runTest("Schemas aceitam somente status existentes nas tabelas de recrutamento", () => {
+        assert.equal(vacancyStatusSchema.safeParse("ENCERRADA").success, true);
+        assert.equal(vacancyStatusSchema.safeParse("CONTRATADA").success, false);
+        assert.equal(applicationStatusSchema.safeParse("EM_SELECAO").success, true);
+        assert.equal(applicationStatusSchema.safeParse("PENDENTE").success, false);
     });
 
     await runTest("resetUserPasswordSchema exige senha com pelo menos 8 caracteres", () => {
@@ -215,6 +221,9 @@ async function main() {
     await runTest("Autorização de edição permite usuário editar o próprio cadastro", () => {
         assert.equal(isAdminOrSelf("EMPLOYEE", "user-1", "user-1"), true);
         assert.equal(isAdminOrSelf("sakai", "admin-1", "user-1"), true);
+        assert.equal(isAdminOrSelf("admin", "admin-1", "user-1"), false);
+        assert.equal(isAdminOrSelf("hr_admin", "hr-admin-1", "user-1"), false);
+        assert.equal(isAdminOrSelf("supervisor", "supervisor-1", "user-1"), false);
         assert.equal(isAdminOrSelf("EMPLOYEE", "user-1", "user-2"), false);
     });
 

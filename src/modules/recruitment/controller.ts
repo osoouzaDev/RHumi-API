@@ -1,117 +1,77 @@
-import type { Request, Response, NextFunction } from "express";
+import type { NextFunction, Response } from "express";
+import type { AuthRequest } from "../../middlewares/auth.js";
 import { validatedBody, validatedParams } from "../../middlewares/validate.js";
-import { success } from "../../shared/http/success.js";
-import { authService } from "../auth/service.js";
-import { usuariosService } from "../users/service.js";
+import { created, success } from "../../shared/http/success.js";
 import { AppError } from "../../shared/errors/app-error.js";
 import type {
-    CandidateApplicationDTO,
-    CandidateRegistrationDTO,
+    ApplicationStatus,
+    CreateCandidateApplicationDTO,
     CreateVacancyDTO,
-    UpdateApplicationStatusDTO,
-    UpdateVacancyStatusDTO,
+    VacancyStatus,
 } from "./dto.js";
 import { recruitmentRepository } from "./repository.js";
-import type { AuthRequest } from "../../middlewares/auth.js";
+
+function authenticatedUserId(req: AuthRequest): string {
+    if (!req.user?.id) {
+        throw new AppError("Usuário não autenticado.", 401);
+    }
+    return req.user.id;
+}
 
 export const recruitmentController = {
-    async listarVagas(_req: Request, res: Response, next: NextFunction): Promise<void> {
+    async listVacancies(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
         try {
-            success(res, await recruitmentRepository.listarVagas());
+            success(res, await recruitmentRepository.listVacancies(authenticatedUserId(req)));
         } catch (error) {
             next(error);
         }
     },
 
-    async listarVagasPublicas(_req: Request, res: Response, next: NextFunction): Promise<void> {
+    async createVacancy(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
         try {
-            success(res, await recruitmentRepository.listarVagasPublicas());
+            const data = validatedBody<CreateVacancyDTO>(req);
+            created(res, await recruitmentRepository.createVacancy(authenticatedUserId(req), data));
         } catch (error) {
             next(error);
         }
     },
 
-    async registrarCandidato(req: Request, res: Response, next: NextFunction): Promise<void> {
-        try {
-            const data = validatedBody<CandidateRegistrationDTO>(req);
-            const user = await usuariosService.criar({
-                login: data.email,
-                nome: data.nome,
-                email: data.email,
-                senha: data.senha,
-                classificacao: "CANDIDATE",
-                ativo: true,
-                telefone: data.telefone ?? null,
-            });
-            const tokens = await authService.autenticar({
-                email: data.email,
-                senha: data.senha,
-            });
-            success(res, {
-                ...tokens,
-                profile: {
-                    id: user.id,
-                    userLogin: user.login,
-                    classificacao: user.classificacao,
-                },
-            }, 201);
-        } catch (error) {
-            next(error);
-        }
-    },
-
-    async criarVaga(req: Request, res: Response, next: NextFunction): Promise<void> {
-        try {
-            success(res, await recruitmentRepository.criarVaga(validatedBody<CreateVacancyDTO>(req)), 201);
-        } catch (error) {
-            next(error);
-        }
-    },
-
-    async atualizarStatusVaga(req: Request, res: Response, next: NextFunction): Promise<void> {
+    async updateVacancyStatus(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
         try {
             const { id } = validatedParams<{ id: string }>(req);
-            const data = validatedBody<UpdateVacancyStatusDTO>(req);
-            success(res, await recruitmentRepository.atualizarStatusVaga(id, data));
+            const { status } = validatedBody<{ status: VacancyStatus }>(req);
+            success(res, await recruitmentRepository.updateVacancyStatus(authenticatedUserId(req), id, status));
         } catch (error) {
             next(error);
         }
     },
 
-    async listarCandidaturas(_req: Request, res: Response, next: NextFunction): Promise<void> {
+    async listApplications(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
         try {
-            success(res, await recruitmentRepository.listarCandidaturas());
+            success(res, await recruitmentRepository.listApplications(authenticatedUserId(req)));
         } catch (error) {
             next(error);
         }
     },
 
-    async atualizarStatusCandidatura(req: Request, res: Response, next: NextFunction): Promise<void> {
+    async createApplication(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
+        try {
+            const data = validatedBody<CreateCandidateApplicationDTO>(req);
+            created(res, await recruitmentRepository.createApplication(authenticatedUserId(req), data));
+        } catch (error) {
+            next(error);
+        }
+    },
+
+    async updateApplicationStatus(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
         try {
             const { id } = validatedParams<{ id: string }>(req);
-            const data = validatedBody<UpdateApplicationStatusDTO>(req);
-            success(res, await recruitmentRepository.atualizarStatusCandidatura(id, data));
-        } catch (error) {
-            next(error);
-        }
-    },
-
-    async listarMinhasCandidaturas(req: Request, res: Response, next: NextFunction): Promise<void> {
-        try {
-            const usuarioId = (req as AuthRequest).user?.id;
-            if (!usuarioId) throw new AppError("Usuário não autenticado.", 401);
-            success(res, await recruitmentRepository.listarCandidaturasDoCandidato(usuarioId));
-        } catch (error) {
-            next(error);
-        }
-    },
-
-    async candidatar(req: Request, res: Response, next: NextFunction): Promise<void> {
-        try {
-            const usuarioId = (req as AuthRequest).user?.id;
-            if (!usuarioId) throw new AppError("Usuário não autenticado.", 401);
-            const data = validatedBody<CandidateApplicationDTO>(req);
-            success(res, await recruitmentRepository.candidatarComoUsuario(usuarioId, data), 201);
+            const { status } = validatedBody<{ status: ApplicationStatus }>(req);
+            success(res, await recruitmentRepository.updateApplicationStatus(
+                authenticatedUserId(req),
+                id,
+                status
+            ));
         } catch (error) {
             next(error);
         }

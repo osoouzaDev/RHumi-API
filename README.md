@@ -88,13 +88,10 @@ curl -X POST http://localhost:8000/api/auth/login \
   }'
 ```
 
-O código é gerado automaticamente para usuários colaboradores e é incluído na
-resposta de `POST /api/usuarios`. Contas com perfil `CANDIDATE` não recebem esse
-código e entram usando e-mail e senha. Execute as migrations
+O código é gerado automaticamente para cada usuário criado e é incluído na
+resposta de `POST /api/usuarios`. Execute a migration
 `src/database/migrations/002_codigo_colaborador_usuario.sql` antes de usar o
-novo formato de login e
-`src/database/migrations/008_codigo_colaborador_opcional_candidato.sql` para
-permitir contas de candidatos sem código. Os códigos existentes também são preenchidos pela migration 002.
+novo formato de login. Os códigos existentes também são preenchidos pela migration.
 O intervalo disponível é de `0000` a `9999`; códigos emitidos não são reutilizados,
 inclusive após a exclusão de um usuário.
 
@@ -119,22 +116,52 @@ Antes de usar os campos de apresentação da empresa, execute a migration
 - `POST /api/empresa/setores`: adiciona um setor; requer perfil administrador.
 - `DELETE /api/empresa/setores/:id`: remove um setor sem colaboradores vinculados; requer perfil administrador.
 
-## Jornadas e recrutamento
+## Recrutamento
 
-Antes de usar as telas de jornada e recrutamento, execute a migration
-`src/database/migrations/007_jornadas_recrutamento.sql` no banco configurado
-para a API. Ela mantém as tabelas existentes `jornada_tarefa`, `vaga` e
-`candidatura`; apenas permite candidaturas sem conta e adiciona os campos de
-contato do candidato. Configure também `DEFAULT_EMPRESA_ID` com o UUID da empresa.
+Execute `src/database/migrations/007_recrutamento.sql` em ambientes que ainda
+não tenham as tabelas `vaga`, `candidato` e `candidatura`. A migration usa
+`CREATE TABLE IF NOT EXISTS` e preserva essas tabelas quando já existem.
 
-- `GET /api/jornadas`: lista os colaboradores ativos e suas etapas de integração; requer autenticação.
-- `PATCH /api/jornadas/:usuarioId/etapas/:etapaKey/tarefas/:tarefaKey`: atualiza uma tarefa; requer perfil administrador.
-- `DELETE /api/jornadas/:usuarioId/etapas/:etapaKey`: reabre uma etapa; requer perfil administrador.
-- `/api/recrutamento/vagas`: lista, cria e atualiza o status das vagas; requer perfil administrador.
-- `GET /api/recrutamento/candidaturas` e `PATCH /api/recrutamento/candidaturas/:id/status`: lista candidaturas e atualiza status; requer perfil administrador.
-- `GET /api/public/vagas`: lista as vagas abertas da empresa sem exigir autenticação.
-- `POST /api/public/candidatos`: cria uma conta de candidato e retorna os tokens de sessão; o perfil `CANDIDATE` é definido pela API.
-- `GET /api/candidato/candidaturas` e `POST /api/candidato/candidaturas`: consultam e registram candidaturas para o candidato autenticado.
+As rotas usam o `id_empresa` do usuário autenticado, sem aceitar empresa enviada
+pelo cliente. Consultas e alterações ficam limitadas à empresa desse usuário;
+criação e atualização exigem perfil administrador.
+
+- `GET /api/recrutamento/vagas` e `POST /api/recrutamento/vagas`: consultar e cadastrar vagas.
+- `PATCH /api/recrutamento/vagas/:id/status`: pausar ou reabrir uma vaga.
+- `GET /api/recrutamento/candidaturas` e `POST /api/recrutamento/candidaturas`: listar candidaturas e associar um candidato a uma vaga aberta.
+- `PATCH /api/recrutamento/candidaturas/:id/status`: atualizar a etapa da candidatura.
+
+Os tipos de contrato e etapas aceitos correspondem aos valores definidos nas
+restrições das tabelas de recrutamento. O cadastro de candidato grava/atualiza
+seus dados em `candidato` e cria a relação com a vaga em `candidatura`.
+
+## Treinamentos e avaliações
+
+Execute `src/database/migrations/009_treinamentos_avaliacoes.sql` depois da
+migration inicial e `src/database/migrations/010_prova_treinamento.sql` para
+habilitar a prova opcional associada ao treinamento. Execute também
+`src/database/migrations/011_exclusao_cascade_resultados.sql` para permitir a
+exclusão confirmada de conteúdos com resultados vinculados. A migration 009
+preserva os treinamentos existentes e associa os setores já cadastrados.
+Configure `DEFAULT_EMPRESA_ID`.
+
+Anexos PDF são limitados a 10 MiB e armazenados fora de uma rota pública. O
+padrão é `./storage/training-pdfs`; configure `TRAINING_PDF_DIR` para apontar
+para um volume persistente no ambiente de produção.
+
+- `GET /api/capacitacoes`: lista conteúdos de gerenciamento para administradores; para colaboradores, retorna somente conteúdos ativos destinados ao setor atual e omite as respostas corretas.
+- `POST /api/capacitacoes` e `PUT /api/capacitacoes/:id`: criam e editam treinamentos/avaliações; requer perfil administrador. Para PDF anexado, envie o campo `pdf` em `multipart/form-data`.
+- `PATCH /api/capacitacoes/:id/status`: ativa ou desativa um conteúdo; requer perfil administrador.
+- `DELETE /api/capacitacoes/:id`: exclui o conteúdo e, quando `apagar_resultados: true` for explicitamente confirmado, também remove permanentemente suas tentativas e resultados.
+- `GET /api/capacitacoes/:id/pdf`: visualiza o anexo após validar empresa e destino setorial.
+- `GET /api/capacitacoes/:id/resultados`: consulta o histórico de tentativas; requer perfil administrador.
+- `POST /api/capacitacoes/:id/respostas`: recebe a avaliação do colaborador autenticado, corrige no servidor e retorna a quantidade de acertos.
+
+Cada avaliação permite uma tentativa por colaborador. A pontuação é a contagem
+de respostas corretas; perguntas, alternativas, respostas e resultados enviados
+são preservados em um snapshot histórico quando o conteúdo é editado. A prova
+opcional do treinamento usa nota mínima configurável (padrão de 70%); o limiar
+e a aprovação ficam registrados junto com cada tentativa.
 
 ## 5. Usar token na autenticação
 
