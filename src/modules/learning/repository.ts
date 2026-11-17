@@ -413,6 +413,89 @@ export const learningRepository = {
         });
     },
 
+    async listarDesempenho() {
+        const result = await banco.query(
+            `WITH colaboradores AS (
+                 SELECT u.id AS id_usuario,
+                        COALESCE(NULLIF(u.nome, ''), colaborador.nome) AS nome,
+                        u.email,
+                        colaborador.cargo,
+                        setor.nome_setor AS setor
+                 FROM public.usuario u
+                 JOIN LATERAL (
+                     SELECT cadastro.nome, cadastro.id_setor, cadastro.cargo
+                     FROM public.usuario_colaborador cadastro
+                     WHERE cadastro.id_empresa = u.id_empresa
+                       AND (cadastro.id_usuario = u.id OR LOWER(cadastro.email) = LOWER(u.email))
+                       AND cadastro.status = 'ATIVO'
+                       AND UPPER(cadastro.classificacao) = 'EMPLOYEE'
+                     ORDER BY (cadastro.id_usuario = u.id) IS TRUE DESC, cadastro.created_at DESC
+                     LIMIT 1
+                 ) colaborador ON TRUE
+                 LEFT JOIN public.setor setor ON setor.id = colaborador.id_setor
+                 WHERE u.id_empresa = $1 AND u.ativo = TRUE
+             )
+             SELECT colaborador.id_usuario::text AS id_usuario,
+                    colaborador.nome,
+                    colaborador.email,
+                    colaborador.cargo,
+                    colaborador.setor,
+                    COUNT(conteudo.id)::int AS total_respostas,
+                    COUNT(conteudo.id) FILTER (WHERE conteudo.tipo = 'TREINAMENTO')::int AS total_treinamentos,
+                    COUNT(conteudo.id) FILTER (WHERE conteudo.tipo = 'AVALIACAO')::int AS total_avaliacoes,
+                    ROUND(AVG(
+                        CASE WHEN conteudo.id IS NOT NULL
+                            THEN tentativa.acertos::numeric * 100 / NULLIF(tentativa.total_perguntas, 0)
+                        END
+                    ))::int
+                        AS media_percentual,
+                    COALESCE(
+                        JSONB_AGG(
+                            JSONB_BUILD_OBJECT(
+                                'id', tentativa.id::text,
+                                'id_conteudo', conteudo.id::text,
+                                'titulo', conteudo.titulo,
+                                'tipo', conteudo.tipo,
+                                'acertos', tentativa.acertos,
+                                'total_perguntas', tentativa.total_perguntas,
+                                'percentual', ROUND(tentativa.acertos::numeric * 100 / NULLIF(tentativa.total_perguntas, 0))::int,
+                                'entregue_em', tentativa.entregue_em,
+                                'nota_minima', tentativa.nota_minima_snapshot,
+                                'aprovado', tentativa.aprovado
+                            ) ORDER BY tentativa.entregue_em DESC
+                        ) FILTER (WHERE tentativa.id IS NOT NULL AND conteudo.id IS NOT NULL),
+                        '[]'::jsonb
+                    ) AS resultados
+             FROM colaboradores colaborador
+             LEFT JOIN public.rh_avaliacao_tentativa tentativa
+               ON tentativa.id_usuario = colaborador.id_usuario
+             LEFT JOIN public.rh_conteudo conteudo
+               ON conteudo.id = tentativa.id_conteudo AND conteudo.id_empresa = $1
+             GROUP BY colaborador.id_usuario, colaborador.nome, colaborador.email,
+                      colaborador.cargo, colaborador.setor
+             ORDER BY colaborador.nome`,
+            [companyId()],
+        );
+
+        return result.rows.map((row) => {
+            if (!Array.isArray(row.resultados)) {
+                throw new Error("A consulta de desempenho retornou resultados em formato inválido.");
+            }
+            return {
+                id_usuario: String(row.id_usuario),
+                nome: String(row.nome),
+                email: String(row.email),
+                cargo: row.cargo == null ? null : String(row.cargo),
+                setor: row.setor == null ? null : String(row.setor),
+                total_respostas: Number(row.total_respostas),
+                total_treinamentos: Number(row.total_treinamentos),
+                total_avaliacoes: Number(row.total_avaliacoes),
+                media_percentual: row.media_percentual == null ? null : Number(row.media_percentual),
+                resultados: row.resultados,
+            };
+        });
+    },
+
     async listarResultados(id: string) {
         const content = await banco.query(
             `SELECT id FROM public.rh_conteudo

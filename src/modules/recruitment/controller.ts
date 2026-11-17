@@ -1,4 +1,4 @@
-import type { NextFunction, Response } from "express";
+import type { NextFunction, Request, Response } from "express";
 import type { AuthRequest } from "../../middlewares/auth.js";
 import { validatedBody, validatedParams } from "../../middlewares/validate.js";
 import { created, success } from "../../shared/http/success.js";
@@ -19,6 +19,14 @@ function authenticatedUserId(req: AuthRequest): string {
 }
 
 export const recruitmentController = {
+    async listPublicVacancies(_req: Request, res: Response, next: NextFunction): Promise<void> {
+        try {
+            success(res, await recruitmentRepository.listPublicVacancies());
+        } catch (error) {
+            next(error);
+        }
+    },
+
     async listVacancies(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
         try {
             success(res, await recruitmentRepository.listVacancies(authenticatedUserId(req)));

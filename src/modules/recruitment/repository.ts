@@ -90,6 +90,22 @@ async function findApplication(client: PoolClient, companyId: string, applicatio
 }
 
 export const recruitmentRepository = {
+    async listPublicVacancies(): Promise<VacancyRecord[]> {
+        const companyId = process.env.DEFAULT_EMPRESA_ID?.trim();
+        if (!companyId) {
+            throw new AppError("DEFAULT_EMPRESA_ID não está configurada.", 500);
+        }
+        const result = await banco.query(
+            `SELECT id::text AS id, titulo, setor, localidade, tipo_contrato,
+                    descricao, status, created_at
+             FROM public.vaga
+             WHERE id_empresa = $1 AND status = 'ABERTA'
+             ORDER BY created_at DESC, titulo`,
+            [companyId],
+        );
+        return result.rows.map(vacancyFromRow);
+    },
+
     async listVacancies(userId: string): Promise<VacancyRecord[]> {
         const companyId = await resolveCompanyId(userId);
         const result = await banco.query(

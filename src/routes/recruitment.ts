@@ -14,6 +14,7 @@ import { recruitmentController } from "../modules/recruitment/controller.js";
 
 export const recruitmentRouter = Router();
 
+recruitmentRouter.get("/api/public/vagas", recruitmentController.listPublicVacancies);
 recruitmentRouter.get("/api/recrutamento/vagas", autenticarToken, recruitmentController.listVacancies);
 recruitmentRouter.post(
     "/api/recrutamento/vagas",

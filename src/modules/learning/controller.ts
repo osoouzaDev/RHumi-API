@@ -192,6 +192,14 @@ export const learningController = {
         }
     },
 
+    async listarDesempenho(_req: Request, res: Response, next: NextFunction): Promise<void> {
+        try {
+            success(res, await learningRepository.listarDesempenho());
+        } catch (error) {
+            next(error);
+        }
+    },
+
     async visualizarPdf(req: Request, res: Response, next: NextFunction): Promise<void> {
         try {
             const user = requireUser(req);
@@ -207,8 +215,17 @@ export const learningController = {
             res.setHeader("Cache-Control", "private, no-store");
             res.setHeader("X-Content-Type-Options", "nosniff");
             res.sendFile(filePath, (error) => {
-                if (error && !res.headersSent) next(error);
-                else if (error) res.destroy(error);
+                if (!error) return;
+                if (res.headersSent) {
+                    res.destroy(error);
+                    return;
+                }
+                const code = "code" in error && typeof error.code === "string" ? error.code : "";
+                if (code === "ENOENT" || code === "ENOTDIR") {
+                    next(new AppError("O arquivo PDF deste treinamento não está disponível. Solicite o reenvio do anexo.", 404));
+                    return;
+                }
+                next(error);
             });
         } catch (error) {
             next(error);

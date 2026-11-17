@@ -122,10 +122,12 @@ Execute `src/database/migrations/007_recrutamento.sql` em ambientes que ainda
 não tenham as tabelas `vaga`, `candidato` e `candidatura`. A migration usa
 `CREATE TABLE IF NOT EXISTS` e preserva essas tabelas quando já existem.
 
-As rotas usam o `id_empresa` do usuário autenticado, sem aceitar empresa enviada
-pelo cliente. Consultas e alterações ficam limitadas à empresa desse usuário;
-criação e atualização exigem perfil administrador.
+As rotas administrativas usam o `id_empresa` do usuário autenticado, sem aceitar
+empresa enviada pelo cliente. Consultas e alterações ficam limitadas à empresa
+desse usuário; criação e atualização exigem perfil administrador. A rota pública
+usa `DEFAULT_EMPRESA_ID` e retorna somente vagas abertas.
 
+- `GET /api/public/vagas`: lista vagas abertas para o site de carreiras, sem autenticação.
 - `GET /api/recrutamento/vagas` e `POST /api/recrutamento/vagas`: consultar e cadastrar vagas.
 - `PATCH /api/recrutamento/vagas/:id/status`: pausar ou reabrir uma vaga.
 - `GET /api/recrutamento/candidaturas` e `POST /api/recrutamento/candidaturas`: listar candidaturas e associar um candidato a uma vaga aberta.
@@ -155,6 +157,7 @@ para um volume persistente no ambiente de produção.
 - `DELETE /api/capacitacoes/:id`: exclui o conteúdo e, quando `apagar_resultados: true` for explicitamente confirmado, também remove permanentemente suas tentativas e resultados.
 - `GET /api/capacitacoes/:id/pdf`: visualiza o anexo após validar empresa e destino setorial.
 - `GET /api/capacitacoes/:id/resultados`: consulta o histórico de tentativas; requer perfil administrador.
+- `GET /api/capacitacoes/desempenho`: consolida médias e tentativas de avaliações e provas de treinamento por colaborador ativo; requer perfil administrador.
 - `POST /api/capacitacoes/:id/respostas`: recebe a avaliação do colaborador autenticado, corrige no servidor e retorna a quantidade de acertos.
 
 Cada avaliação permite uma tentativa por colaborador. A pontuação é a contagem
@@ -162,6 +165,9 @@ de respostas corretas; perguntas, alternativas, respostas e resultados enviados
 são preservados em um snapshot histórico quando o conteúdo é editado. A prova
 opcional do treinamento usa nota mínima configurável (padrão de 70%); o limiar
 e a aprovação ficam registrados junto com cada tentativa.
+O desempenho contabiliza avaliações respondidas e provas vinculadas a
+treinamentos; a visualização de um treinamento sem prova não gera pontuação
+nem registro de conclusão.
 
 ## 5. Usar token na autenticação
 

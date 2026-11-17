@@ -47,6 +47,12 @@ learningRouter.delete(
     learningController.excluir,
 );
 learningRouter.get(
+    "/api/capacitacoes/desempenho",
+    autenticarToken,
+    authAdmin,
+    learningController.listarDesempenho,
+);
+learningRouter.get(
     "/api/capacitacoes/:id/resultados",
     autenticarToken,
     authAdmin,
