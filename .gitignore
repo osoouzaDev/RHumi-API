@@ -13,4 +13,6 @@ npm-debug.log*
 # Certificados e chaves
 certs
 *.pem
+secrets/
+google-service-account*.json
 storage/training-pdfs/

@@ -9,6 +9,13 @@ import { AppError } from "../../shared/errors/app-error.js";
 import { success } from "../../shared/http/success.js";
 import { saveLearningItemSchema, type SaveLearningItemDTO, type SubmitAssessmentDTO } from "./dto.js";
 import { learningRepository } from "./repository.js";
+import {
+    deleteTrainingPdf,
+    downloadTrainingPdf,
+    googleDriveEnabled,
+    isGoogleDriveReference,
+    uploadTrainingPdf,
+} from "./google-drive.js";
 
 const pdfLimitBytes = 10 * 1024 * 1024;
 const upload = multer({
@@ -85,11 +92,24 @@ function parseItemBody(body: unknown): SaveLearningItemDTO {
     return parsed.data;
 }
 
+function pdfFileName(file: Express.Multer.File): string {
+    const name = file.originalname
+        .replace(/[\\/:*?"<>|]/g, "-")
+        .replace(/\s+/g, " ")
+        .trim();
+    if (!name) return `${randomUUID()}.pdf`;
+    return name.toLowerCase().endsWith(".pdf") ? name : `${name}.pdf`;
+}
+
 async function savePdf(file: Express.Multer.File | undefined): Promise<string | null> {
     if (!file) return null;
     if (!file.buffer.subarray(0, 5).equals(Buffer.from("%PDF-"))) {
         throw new AppError("O arquivo selecionado não contém um PDF válido.", 415);
     }
+    if (googleDriveEnabled()) {
+        return uploadTrainingPdf(file.buffer, pdfFileName(file));
+    }
+
     const directory = storageDirectory();
     await mkdir(directory, { recursive: true });
     const name = `${randomUUID()}.pdf`;
@@ -97,9 +117,13 @@ async function savePdf(file: Express.Multer.File | undefined): Promise<string | 
     return name;
 }
 
-async function removePdf(name: string | null): Promise<void> {
-    if (!name) return;
-    await unlink(path.join(storageDirectory(), name)).catch((error: NodeJS.ErrnoException) => {
+async function removePdf(reference: string | null): Promise<void> {
+    if (!reference) return;
+    if (isGoogleDriveReference(reference)) {
+        await deleteTrainingPdf(reference);
+        return;
+    }
+    await unlink(path.join(storageDirectory(), reference)).catch((error: NodeJS.ErrnoException) => {
         if (error.code !== "ENOENT") throw error;
     });
 }
@@ -128,7 +152,7 @@ export const learningController = {
                 throw new AppError("Anexe um PDF somente a um treinamento configurado como PDF e sem URL.", 400);
             }
             savedPdf = await savePdf(req.file);
-            const item = await learningRepository.criar(data, savedPdf);
+            const item = await learningRepository.criar(data, savedPdf, req.file ? pdfFileName(req.file) : null);
             savedPdf = null;
             success(res, item, 201);
         } catch (error) {
@@ -147,7 +171,12 @@ export const learningController = {
             }
             const oldPdf = await learningRepository.buscarArquivoPdf(id);
             savedPdf = await savePdf(req.file);
-            const item = await learningRepository.atualizar(id, data, savedPdf);
+            const item = await learningRepository.atualizar(
+                id,
+                data,
+                savedPdf,
+                req.file ? pdfFileName(req.file) : null,
+            );
             savedPdf = null;
             const currentPdf = await learningRepository.buscarArquivoPdf(id);
             if (oldPdf && oldPdf !== currentPdf) await removePdf(oldPdf);
@@ -205,15 +234,22 @@ export const learningController = {
             const user = requireUser(req);
             const { id } = validatedParams<{ id: string }>(req);
             const storedName = await learningRepository.caminhoPdf(id, user.id, user.classificacao);
+            res.setHeader("Content-Type", "application/pdf");
+            res.setHeader("Content-Disposition", "inline");
+            res.setHeader("Cache-Control", "private, no-store");
+            res.setHeader("X-Content-Type-Options", "nosniff");
+
+            if (isGoogleDriveReference(storedName)) {
+                const file = await downloadTrainingPdf(storedName);
+                res.send(file);
+                return;
+            }
+
             const directory = storageDirectory();
             const filePath = path.resolve(directory, storedName);
             if (path.dirname(filePath) !== directory) {
                 throw new AppError("Arquivo PDF não encontrado.", 404);
             }
-            res.setHeader("Content-Type", "application/pdf");
-            res.setHeader("Content-Disposition", "inline");
-            res.setHeader("Cache-Control", "private, no-store");
-            res.setHeader("X-Content-Type-Options", "nosniff");
             res.sendFile(filePath, (error) => {
                 if (!error) return;
                 if (res.headersSent) {
