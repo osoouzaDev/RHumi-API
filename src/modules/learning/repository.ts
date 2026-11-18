@@ -100,7 +100,7 @@ async function itemDetails(
     const itemResult = await query(
         `SELECT id::text AS id, tipo, titulo, descricao, tipo_material, url_material,
                 prova_ativa, prova_titulo, prova_descricao, prova_nota_minima,
-                (arquivo_pdf IS NOT NULL) AS tem_pdf, ativo, created_at, updated_at
+                (arquivo_pdf IS NOT NULL) AS tem_pdf, nome_arquivo_pdf, ativo, created_at, updated_at
          FROM public.rh_conteudo
          WHERE id = $1 AND id_empresa = $2`,
         [contentId, idEmpresa],
@@ -160,6 +160,7 @@ async function itemDetails(
         tipo_material: item.tipo_material == null ? null : String(item.tipo_material),
         url_material: item.url_material == null ? null : String(item.url_material),
         tem_pdf: Boolean(item.tem_pdf),
+        nome_arquivo_pdf: item.nome_arquivo_pdf == null ? null : String(item.nome_arquivo_pdf),
         ativo: Boolean(item.ativo),
         setores: sectorsResult.rows.map((row) => ({
             id: String(row.id),
@@ -251,7 +252,7 @@ export const learningRepository = {
         return items.filter((item): item is Record<string, unknown> => item !== null);
     },
 
-    async criar(data: SaveLearningItemDTO, arquivoPdf: string | null) {
+    async criar(data: SaveLearningItemDTO, arquivoPdf: string | null, nomeArquivoPdf: string | null) {
         const idEmpresa = companyId();
         if (data.tipo === "TREINAMENTO" && data.tipo_material === "PDF" &&
             !data.url_material && !arquivoPdf) {
@@ -262,15 +263,16 @@ export const learningRepository = {
             await ensureSectors(client, data.setores, idEmpresa);
             const result = await client.query(
                 `INSERT INTO public.rh_conteudo
-                     (id_empresa, tipo, titulo, descricao, tipo_material, url_material, arquivo_pdf, ativo,
+                     (id_empresa, tipo, titulo, descricao, tipo_material, url_material, arquivo_pdf, nome_arquivo_pdf, ativo,
                       prova_ativa, prova_titulo, prova_descricao, prova_nota_minima)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
                  RETURNING id::text AS id`,
                 [
                     idEmpresa, data.tipo, data.titulo, data.descricao,
                     data.tipo === "TREINAMENTO" ? data.tipo_material : null,
                     data.tipo === "TREINAMENTO" ? data.url_material : null,
                     arquivoPdf,
+                    nomeArquivoPdf,
                     data.ativo,
                     data.tipo === "TREINAMENTO" && data.prova?.ativa === true,
                     data.tipo === "TREINAMENTO" ? data.prova?.titulo || null : null,
@@ -305,7 +307,7 @@ export const learningRepository = {
         return result.rows[0]?.arquivo_pdf == null ? null : String(result.rows[0].arquivo_pdf);
     },
 
-    async atualizar(id: string, data: SaveLearningItemDTO, arquivoPdf: string | null) {
+    async atualizar(id: string, data: SaveLearningItemDTO, arquivoPdf: string | null, nomeArquivoPdf: string | null) {
         const idEmpresa = companyId();
         if (data.tipo === "TREINAMENTO" && data.tipo_material === "PDF" &&
             !data.url_material && !arquivoPdf && !(await this.buscarArquivoPdf(id))) {
@@ -314,7 +316,7 @@ export const learningRepository = {
         const saved = await transaction(async (client) => {
             await ensureSectors(client, data.setores, idEmpresa);
             const current = await client.query(
-                `SELECT arquivo_pdf, tipo FROM public.rh_conteudo
+                `SELECT arquivo_pdf, nome_arquivo_pdf, tipo FROM public.rh_conteudo
                  WHERE id = $1 AND id_empresa = $2 FOR UPDATE`,
                 [id, idEmpresa],
             );
@@ -328,18 +330,24 @@ export const learningRepository = {
             const nextPdf = data.tipo !== "TREINAMENTO" || data.tipo_material !== "PDF" || data.url_material
                 ? null
                 : arquivoPdf ?? existingPdf;
+            const existingPdfName = current.rows[0].nome_arquivo_pdf == null
+                ? null
+                : String(current.rows[0].nome_arquivo_pdf);
+            const nextPdfName = nextPdf == null
+                ? null
+                : nomeArquivoPdf ?? existingPdfName;
             await client.query(
                 `UPDATE public.rh_conteudo
                  SET tipo = $3, titulo = $4, descricao = $5, tipo_material = $6,
-                     url_material = $7, arquivo_pdf = $8, ativo = $9,
-                     prova_ativa = $10, prova_titulo = $11, prova_descricao = $12,
-                     prova_nota_minima = $13
+                     url_material = $7, arquivo_pdf = $8, nome_arquivo_pdf = $9, ativo = $10,
+                     prova_ativa = $11, prova_titulo = $12, prova_descricao = $13,
+                     prova_nota_minima = $14
                  WHERE id = $1 AND id_empresa = $2`,
                 [
                     id, idEmpresa, data.tipo, data.titulo, data.descricao,
                     data.tipo === "TREINAMENTO" ? data.tipo_material : null,
                     data.tipo === "TREINAMENTO" ? data.url_material : null,
-                    nextPdf, data.ativo,
+                    nextPdf, nextPdfName, data.ativo,
                     data.tipo === "TREINAMENTO" && data.prova?.ativa === true,
                     data.tipo === "TREINAMENTO" ? data.prova?.titulo || null : null,
                     data.tipo === "TREINAMENTO" ? data.prova?.descricao || null : null,

@@ -147,9 +147,16 @@ exclusão confirmada de conteúdos com resultados vinculados. A migration 009
 preserva os treinamentos existentes e associa os setores já cadastrados.
 Configure `DEFAULT_EMPRESA_ID`.
 
-Anexos PDF são limitados a 10 MiB e armazenados fora de uma rota pública. O
-padrão é `./storage/training-pdfs`; configure `TRAINING_PDF_DIR` para apontar
-para um volume persistente no ambiente de produção.
+Anexos PDF são limitados a 10 MiB e armazenados fora de uma rota pública. Para
+usar o Google Drive, habilite a Drive API no projeto, crie uma conta de serviço,
+compartilhe a pasta com o e-mail da conta de serviço e configure
+`GOOGLE_DRIVE_TRAINING_FOLDER_ID`. Forneça as credenciais por
+`GOOGLE_APPLICATION_CREDENTIALS`, `GOOGLE_DRIVE_SERVICE_ACCOUNT_FILE` ou
+`GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON`. PDFs novos serão gravados na pasta do Drive;
+PDFs locais anteriores continuam disponíveis como compatibilidade temporária.
+
+Sem a integração do Google Drive, o padrão local é `./storage/training-pdfs`;
+configure `TRAINING_PDF_DIR` para apontar para um volume persistente.
 
 - `GET /api/capacitacoes`: lista conteúdos de gerenciamento para administradores; para colaboradores, retorna somente conteúdos ativos destinados ao setor atual e omite as respostas corretas.
 - `POST /api/capacitacoes` e `PUT /api/capacitacoes/:id`: criam e editam treinamentos/avaliações; requer perfil administrador. Para PDF anexado, envie o campo `pdf` em `multipart/form-data`.
