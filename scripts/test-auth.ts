@@ -28,6 +28,7 @@ import {
 import { usuariosService } from "../src/modules/users/service.js";
 import { isAdminOrSelf } from "../src/middlewares/authAdmin.js";
 import { authService } from "../src/modules/auth/service.js";
+import { authSessionRepository } from "../src/modules/auth/session-repository.js";
 import { usuariosRepositorio } from "../src/modules/users/repository.js";
 import { env } from "../src/config/env.js";
 import { AppError } from "../src/shared/errors/app-error.js";
@@ -259,6 +260,22 @@ async function main() {
     const originalBuscarPorId = usuariosRepositorio.buscarPorId;
     const originalBuscarPorEmail = usuariosRepositorio.buscarPorEmail;
     const originalAtualizarSenha = usuariosRepositorio.atualizarSenha;
+    const originalCreateSession = authSessionRepository.create;
+    const originalRotateSession = authSessionRepository.rotate;
+    const originalRevokeSession = authSessionRepository.revoke;
+    const activeRefreshTokens = new Set<string>();
+    authSessionRepository.create = async (_userId, _accessToken, refreshToken) => {
+        activeRefreshTokens.add(refreshToken);
+    };
+    authSessionRepository.rotate = async (_userId, oldRefreshToken, _accessToken, refreshToken) => {
+        if (!activeRefreshTokens.delete(oldRefreshToken)) return false;
+        activeRefreshTokens.add(refreshToken);
+        return true;
+    };
+    authSessionRepository.revoke = async (accessToken, refreshToken) => {
+        if (refreshToken) activeRefreshTokens.delete(refreshToken);
+        if (accessToken) activeRefreshTokens.delete(accessToken);
+    };
 
     await runTest("Autentica com e-mail e senha válidos e retorna tokens", async () => {
         usuariosRepositorio.buscarPorLogin = async (login: string) => {
@@ -437,6 +454,10 @@ async function main() {
         const decoded = jwt.verify(refreshRes.access_token, env.jwtSecret) as any;
         assert.equal(decoded.id, mockUsuarioCodigoAtivo.id);
         assert.equal(decoded.classificacao, "EMPLOYEE");
+        await assert.rejects(
+            () => authService.renovarToken({ refresh_token: authRes.refresh_token }),
+            (error: unknown) => error instanceof AppError && error.statusCode === 401
+        );
     });
 
     await runTest("Rejeita refresh token inválido ou corrompido (401)", async () => {
@@ -541,6 +562,9 @@ async function main() {
     usuariosRepositorio.buscarPorEmail = originalBuscarPorEmail;
     usuariosRepositorio.atualizar = originalUpdate;
     usuariosRepositorio.atualizarSenha = originalAtualizarSenha;
+    authSessionRepository.create = originalCreateSession;
+    authSessionRepository.rotate = originalRotateSession;
+    authSessionRepository.revoke = originalRevokeSession;
 
     console.log("\n=======================================================");
     console.log(`RESULTADO: ${passedTests}/${totalTests} testes passaram.`);

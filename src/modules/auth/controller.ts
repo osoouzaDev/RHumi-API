@@ -77,9 +77,37 @@ function aplicarCookiesTokens(res: Response, token: TokenResponse): void {
  * Remove os cookies de autenticação do cliente (chamado no logout).
  */
 function limparCookiesAuth(res: Response): void {
-    const domain = env.authCookieDomain ? { domain: env.authCookieDomain } : {};
-    res.clearCookie(env.accessTokenCookieName, domain);
-    res.clearCookie(env.refreshTokenCookieName, domain);
+    const cookieOptions = {
+        httpOnly: true,
+        secure: env.authCookieSecure,
+        sameSite: env.rawAuthCookieSameSite as "lax" | "strict" | "none",
+        domain: env.authCookieDomain,
+    } as const;
+    res.clearCookie(env.accessTokenCookieName, cookieOptions);
+    res.clearCookie(env.refreshTokenCookieName, cookieOptions);
+}
+
+function metadata(req: Request): { ipOrigen?: string; userAgent?: string } {
+    const userAgent = req.get("user-agent");
+    return {
+        ...(req.ip ? { ipOrigen: req.ip } : {}),
+        ...(userAgent ? { userAgent } : {}),
+    };
+}
+
+function tokenResponseForBrowser(token: TokenResponse): Pick<TokenResponse, "token_type" | "expires_in"> {
+    return {
+        token_type: token.token_type,
+        expires_in: token.expires_in,
+    };
+}
+
+function accessTokenFromRequest(req: Request): string | undefined {
+    const cookies = extrairCookies(req);
+    const cookieToken = cookies[env.accessTokenCookieName];
+    if (cookieToken) return cookieToken;
+    const authorization = req.get("authorization");
+    return authorization?.startsWith("Bearer ") ? authorization.slice(7).trim() : undefined;
 }
 
 export const authController = {
@@ -94,9 +122,9 @@ export const authController = {
     ): Promise<void> {
         try {
             const dto = validatedBody<LoginDTO>(req);
-            const token = await authService.autenticar(dto);
+            const token = await authService.autenticar(dto, metadata(req));
             aplicarCookiesTokens(res, token);
-            success(res, token, 200);
+            success(res, tokenResponseForBrowser(token), 200);
         } catch (error) {
             next(error);
         }
@@ -113,9 +141,9 @@ export const authController = {
     ): Promise<void> {
         try {
             const dto = validatedBody<LoginCodigoDTO>(req);
-            const token = await authService.autenticarPorCodigo(dto);
+            const token = await authService.autenticarPorCodigo(dto, metadata(req));
             aplicarCookiesTokens(res, token);
-            success(res, token, 200);
+            success(res, tokenResponseForBrowser(token), 200);
         } catch (error) {
             next(error);
         }
@@ -140,7 +168,7 @@ export const authController = {
             };
             const token = await authService.renovarToken(bodyComCookie);
             aplicarCookiesTokens(res, token);
-            success(res, token, 200);
+            success(res, tokenResponseForBrowser(token), 200);
         } catch (error) {
             next(error);
         }
@@ -156,9 +184,11 @@ export const authController = {
         next: NextFunction
     ): Promise<void> {
         try {
-            const authReq = req as AuthRequest;
-            const jti = authReq.user?.jti;
-            await authService.logout(jti);
+            const cookies = extrairCookies(req);
+            await authService.logout(
+                accessTokenFromRequest(req),
+                cookies[env.refreshTokenCookieName],
+            );
             limparCookiesAuth(res);
             noContent(res);
         } catch (error) {

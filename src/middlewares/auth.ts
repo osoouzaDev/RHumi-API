@@ -16,7 +16,7 @@
 
 import type { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
-import { banco } from "../database/connection.js";
+import { authSessionRepository } from "../modules/auth/session-repository.js";
 
 /**
  * Estrutura tipada do payload contido em um access token JWT emitido pela API.
@@ -146,6 +146,13 @@ function parseCookieHeader(cookieHeader: string | undefined): Record<string, str
  * Retorna `null` caso nenhum token seja encontrado.
  */
 function extractAccessToken(req: Request): string | null {
+    const cookieHeader = getHeaderString(req.headers.cookie);
+    const cookies = parseCookieHeader(cookieHeader);
+    const cookieToken = cookies[accessTokenCookieName];
+    if (cookieToken) {
+        return cookieToken.trim();
+    }
+
     const authHeader = req.headers.authorization;
 
     if (authHeader?.startsWith("Bearer ")) {
@@ -155,10 +162,7 @@ function extractAccessToken(req: Request): string | null {
         }
     }
 
-    const cookieHeader = getHeaderString(req.headers.cookie);
-    const cookies = parseCookieHeader(cookieHeader);
-    const cookieToken = cookies[accessTokenCookieName];
-    return cookieToken ? cookieToken.trim() : null;
+    return null;
 }
 
 /**
@@ -181,30 +185,28 @@ export async function autenticarToken(
         return res.sendStatus(401);
     }
 
+    let decoded: jwt.JwtPayload & TokenPayload;
     try {
-        // Verifica assinatura + expiração + issuer + audience em uma única operação.
-        const decoded = jwt.verify(token, secret, {
+        decoded = jwt.verify(token, secret, {
             algorithms: ["HS256"],
             issuer: jwtIssuer,
             audience: jwtAudience,
         }) as jwt.JwtPayload & TokenPayload;
+    } catch {
+        return res.sendStatus(401);
+    }
 
-        // Extrai e valida claims obrigatórias do payload interno.
-        const jti = typeof decoded.jti === "string" ? decoded.jti : "";
-        const exp = Number(decoded.exp);
+    const jti = typeof decoded.jti === "string" ? decoded.jti : "";
+    const exp = Number(decoded.exp);
 
-        if (!jti || !Number.isFinite(exp) || exp <= 0) {
-            return res.sendStatus(403);
-        }
+    if (!decoded.id || !decoded.userLogin || !decoded.classificacao || !jti || !Number.isFinite(exp) || exp <= 0) {
+        return res.sendStatus(401);
+    }
 
-        // Verifica se o token foi explicitamente revogado (logout global).
-        const revogado = await banco.tokenRevogado(jti);
+    try {
+        const active = await authSessionRepository.accessTokenIsActive(String(decoded.id), token);
+        if (!active) return res.sendStatus(401);
 
-        if (revogado) {
-            return res.sendStatus(401);
-        }
-
-        // Anexa o usuário autenticado ao request.
         req.user = {
             id: String(decoded.id),
             userLogin: String(decoded.userLogin),
@@ -213,8 +215,7 @@ export async function autenticarToken(
             exp,
         };
         next();
-    } catch {
-        // Qualquer erro de verificação (assinatura, exp, malformado) → 403.
-        return res.sendStatus(403);
+    } catch (error) {
+        next(error);
     }
 }
