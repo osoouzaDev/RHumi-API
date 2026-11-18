@@ -25,7 +25,9 @@ import { recruitmentRouter } from "./routes/recruitment.js";
 import { reportsRouter } from "./routes/reports.js";
 import { usersRouter } from "./routes/users.js";
 import { learningRouter } from "./routes/learning.js";
+import { calendarRouter } from "./routes/calendar.js";
 import { attachRequestId, type RequestWithId } from "./utils/request.js";
+import { protectCookieRequests } from "./middlewares/csrf.js";
 
 declare global {
     namespace Express {
@@ -63,6 +65,7 @@ export function createApp(): express.Express {
             },
         })
     );
+    app.use(protectCookieRequests);
     app.use(globalLimiter);
 
     app.use(healthRouter);
@@ -70,6 +73,7 @@ export function createApp(): express.Express {
     app.use(companyRouter);
     app.use(usersRouter);
     app.use(learningRouter);
+    app.use(calendarRouter);
     app.use(recruitmentRouter);
     app.use(reportsRouter);
     app.use(errorHandler);

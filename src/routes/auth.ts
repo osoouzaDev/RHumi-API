@@ -56,7 +56,6 @@ authRouter.post(
  */
 authRouter.post(
     "/api/auth/logout",
-    autenticarToken,
     authController.logout
 );
 

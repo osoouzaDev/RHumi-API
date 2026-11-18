@@ -30,7 +30,7 @@ const isProduction = process.env.NODE_ENV === "production";
 
 const refreshTokenTtlDays = Number(process.env.REFRESH_TOKEN_TTL_DAYS) || 30;
 
-const accessTokenCookieMaxAgeSec = Number(process.env.ACCESS_TOKEN_COOKIE_MAX_AGE_SEC) || 1800;
+const accessTokenCookieMaxAgeSec = Number(process.env.ACCESS_TOKEN_TTL_SECONDS) || 600;
 
 const refreshTokenCookieMaxAgeSec = Number(
     process.env.REFRESH_TOKEN_COOKIE_MAX_AGE_SEC ?? String(refreshTokenTtlDays * 24 * 60 * 60)
@@ -51,6 +51,7 @@ if (!Number.isInteger(refreshTokenTtlDays) || refreshTokenTtlDays <= 0) {
 if (
     !Number.isInteger(accessTokenCookieMaxAgeSec) ||
     accessTokenCookieMaxAgeSec <= 0 ||
+    accessTokenCookieMaxAgeSec > 600 ||
     !Number.isInteger(refreshTokenCookieMaxAgeSec) ||
     refreshTokenCookieMaxAgeSec <= 0
 ) {
@@ -73,7 +74,7 @@ export const env = {
     jwtAudience: getRequiredEnv("JWT_AUDIENCE"),
     refreshTokenTtlDays,
     isProduction,
-    authCookiesEnabled: process.env.AUTH_COOKIES_ENABLED === "true",
+    authCookiesEnabled: true,
     accessTokenCookieName: process.env.ACCESS_TOKEN_COOKIE_NAME?.trim() || "access_token",
     refreshTokenCookieName: process.env.REFRESH_TOKEN_COOKIE_NAME?.trim() || "refresh_token",
     accessTokenCookieMaxAgeSec,

@@ -23,8 +23,45 @@ import jwt from "jsonwebtoken";
 import { env } from "../../config/env.js";
 import type { TokenPayload } from "../../middlewares/auth.js";
 import type { LoginDTO, LoginEmailSenhaDTO, LoginCodigoDTO, TokenResponse, RefreshTokenDTO } from "./dto.js";
+import type { Usuario } from "../users/dto.js";
 import { usuariosRepositorio } from "../users/repository.js";
 import { AppError } from "../../shared/errors/app-error.js";
+import { authSessionRepository, type SessionMetadata } from "./session-repository.js";
+
+function refreshExpiry(): Date {
+    return new Date(Date.now() + env.refreshTokenCookieMaxAgeSec * 1000);
+}
+
+async function emitirTokens(
+    usuario: Usuario,
+    metadata: SessionMetadata = {},
+): Promise<TokenResponse> {
+    const accessPayload: Omit<TokenPayload, "exp"> = {
+        id: usuario.id,
+        userLogin: usuario.login,
+        classificacao: usuario.classificacao,
+        jti: gerarJti(),
+    };
+    const refreshPayload: Omit<TokenPayload, "exp"> = {
+        ...accessPayload,
+        jti: gerarJti(),
+    };
+    const accessToken = assinarTokenAcesso(accessPayload);
+    const refreshToken = assinarTokenRefresh(refreshPayload);
+    await authSessionRepository.create(
+        usuario.id,
+        accessToken,
+        refreshToken,
+        refreshExpiry(),
+        metadata,
+    );
+    return {
+        access_token: accessToken,
+        token_type: "Bearer",
+        expires_in: env.accessTokenCookieMaxAgeSec,
+        refresh_token: refreshToken,
+    };
+}
 
 /**
  * Gera o hash de uma senha plana para persistência no banco.
@@ -60,7 +97,7 @@ function gerarJti(): string {
 
 /**
  * Assina o ACCESS token JWT com os claims padrão.
- * `expiresIn` = `env.accessTokenCookieMaxAgeSec` (padrão 30 min).
+ * `expiresIn` = `env.accessTokenCookieMaxAgeSec` (padrão 10 min).
  */
 function assinarTokenAcesso(payload: TokenPayload): string {
     const { exp: _ignoredExp, ...jwtPayload } = payload;
@@ -121,12 +158,15 @@ export const authService = {
      * Fluxo principal de login: detecta se a credencial fornecida é
      * por código do colaborador ou e-mail/login + senha, valida e emite tokens.
      */
-    async autenticar(dto: LoginDTO | LoginEmailSenhaDTO | LoginCodigoDTO): Promise<TokenResponse> {
+    async autenticar(
+        dto: LoginDTO | LoginEmailSenhaDTO | LoginCodigoDTO,
+        metadata: SessionMetadata = {},
+    ): Promise<TokenResponse> {
         // Fluxo 2: Código do colaborador
         if ("codigo_colaborador" in dto && dto.codigo_colaborador) {
             return await authService.autenticarPorCodigo({
                 codigo_colaborador: dto.codigo_colaborador,
-            });
+            }, metadata);
         }
 
         // Fluxo 1: E-mail e senha
@@ -135,7 +175,7 @@ export const authService = {
             if (!loginOuEmail) {
                 throw new AppError("Informe e-mail ou login para autenticar.", 400);
             }
-            return await authService.autenticarPorEmail(loginOuEmail, dto.senha);
+            return await authService.autenticarPorEmail(loginOuEmail, dto.senha, metadata);
         }
 
         throw new AppError("Informe e-mail e senha ou código do colaborador para autenticar.", 400);
@@ -144,36 +184,19 @@ export const authService = {
     /**
      * Autenticação específica por e-mail e senha.
      */
-    async autenticarPorEmail(loginOuEmail: string, senha: string): Promise<TokenResponse> {
+    async autenticarPorEmail(
+        loginOuEmail: string,
+        senha: string,
+        metadata: SessionMetadata = {},
+    ): Promise<TokenResponse> {
         const usuario = await usuarioExisteEValidoParaLogin(loginOuEmail, senha);
-
-        const basePayload: Omit<TokenPayload, "exp"> = {
-            id: usuario.id,
-            userLogin: usuario.login,
-            classificacao: usuario.classificacao,
-            jti: gerarJti(),
-        };
-
-        const accessPayload: Omit<TokenPayload, "exp"> = {
-            ...basePayload,
-        };
-        const refreshPayload: Omit<TokenPayload, "exp"> = {
-            ...basePayload,
-            jti: gerarJti(),
-        };
-
-        return {
-            access_token: assinarTokenAcesso(accessPayload),
-            token_type: "Bearer",
-            expires_in: env.accessTokenCookieMaxAgeSec,
-            refresh_token: assinarTokenRefresh(refreshPayload),
-        };
+        return emitirTokens(usuario, metadata);
     },
 
     /**
      * Autenticação específica por código único do colaborador.
      */
-    async autenticarPorCodigo(dto: LoginCodigoDTO): Promise<TokenResponse> {
+    async autenticarPorCodigo(dto: LoginCodigoDTO, metadata: SessionMetadata = {}): Promise<TokenResponse> {
         const codigo = dto.codigo_colaborador?.trim();
         if (!codigo || !/^\d{4}$/.test(codigo)) {
             throw new AppError("O código do colaborador deve ter exatamente 4 dígitos.", 400);
@@ -187,27 +210,7 @@ export const authService = {
             throw new AppError("Usuário inativo. Contate o administrador.", 403);
         }
 
-        const basePayload: Omit<TokenPayload, "exp"> = {
-            id: usuario.id,
-            userLogin: usuario.login,
-            classificacao: usuario.classificacao,
-            jti: gerarJti(),
-        };
-
-        const accessPayload: Omit<TokenPayload, "exp"> = {
-            ...basePayload,
-        };
-        const refreshPayload: Omit<TokenPayload, "exp"> = {
-            ...basePayload,
-            jti: gerarJti(),
-        };
-
-        return {
-            access_token: assinarTokenAcesso(accessPayload),
-            token_type: "Bearer",
-            expires_in: env.accessTokenCookieMaxAgeSec,
-            refresh_token: assinarTokenRefresh(refreshPayload),
-        };
+        return emitirTokens(usuario, metadata);
     },
 
     /**
@@ -228,10 +231,17 @@ export const authService = {
         } catch {
             throw new AppError("Refresh token inválido ou expirado.", 401);
         }
-
-        const revogado = await authService.tokenFoiRevogado(decoded.jti);
-        if (revogado) {
-            throw new AppError("Refresh token revogado.", 401);
+        if (
+            typeof decoded.id !== "string" ||
+            !decoded.id ||
+            typeof decoded.userLogin !== "string" ||
+            !decoded.userLogin ||
+            typeof decoded.classificacao !== "string" ||
+            !decoded.classificacao ||
+            typeof decoded.jti !== "string" ||
+            !decoded.jti
+        ) {
+            throw new AppError("Refresh token inválido ou expirado.", 401);
         }
 
         // Recheca existência e status do usuário no momento do refresh.
@@ -240,35 +250,43 @@ export const authService = {
             throw new AppError("Usuário não encontrado ou inativo.", 403);
         }
 
-        const novoJti = gerarJti();
         const accessPayload: Omit<TokenPayload, "exp"> = {
             id: usuario.id,
             userLogin: usuario.login,
             classificacao: usuario.classificacao,
-            jti: novoJti,
+            jti: gerarJti(),
         };
+        const refreshPayload: Omit<TokenPayload, "exp"> = {
+            ...accessPayload,
+            jti: gerarJti(),
+        };
+        const accessToken = assinarTokenAcesso(accessPayload);
+        const refreshToken = assinarTokenRefresh(refreshPayload);
+        const rotated = await authSessionRepository.rotate(
+            usuario.id,
+            token,
+            accessToken,
+            refreshToken,
+            refreshExpiry(),
+        );
+        if (!rotated) throw new AppError("Refresh token inválido, expirado ou já utilizado.", 401);
 
         return {
-            access_token: assinarTokenAcesso(accessPayload),
+            access_token: accessToken,
             token_type: "Bearer",
             expires_in: env.accessTokenCookieMaxAgeSec,
+            refresh_token: refreshToken,
         };
     },
 
     /**
      * Stub de logout.
      */
-    async logout(_jti?: string): Promise<{ message: string }> {
+    async logout(accessToken?: string, refreshToken?: string): Promise<{ message: string }> {
+        await authSessionRepository.revoke(accessToken, refreshToken);
         return {
             message: "Logout realizado com sucesso.",
         };
-    },
-
-    /**
-     * Stub de checagem de blacklist.
-     */
-    async tokenFoiRevogado(_jti: string): Promise<boolean> {
-        return false;
     },
 
     hashSenha,

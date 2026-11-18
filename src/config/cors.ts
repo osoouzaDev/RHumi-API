@@ -20,7 +20,7 @@ const envAllowOrigins = process.env.CORS_ALLOWED_ORIGINS
 
 const effectiveAllowedOrigins = [...new Set([...defaultAllowOrigins, ...envAllowOrigins])];
 
-function isAllowedOrigin(origin: string): boolean {
+export function isAllowedOrigin(origin: string): boolean {
     return effectiveAllowedOrigins.includes(origin);
 }
 

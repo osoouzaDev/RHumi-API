@@ -67,13 +67,16 @@ Resposta esperada:
 {
   "success": true,
   "data": {
-    "access_token": "...",
     "token_type": "Bearer",
-    "expires_in": 1800,
-    "refresh_token": "..."
+    "expires_in": 600
   }
 }
 ```
+
+Os tokens são enviados somente em cookies `HttpOnly`; o corpo não expõe
+credenciais de sessão. O navegador deve usar `credentials: "include"` nas
+requisições à API. O access token expira em até 10 minutos e o refresh token é
+rotacionado no servidor.
 
 ### Entrar com código do colaborador
 
@@ -176,9 +179,20 @@ O desempenho contabiliza avaliações respondidas e provas vinculadas a
 treinamentos; a visualização de um treinamento sem prova não gera pontuação
 nem registro de conclusão.
 
-## 5. Usar token na autenticação
+## 5. Sessões por cookies HttpOnly
 
-Após receber o `access_token`, envie no header:
+A API define cookies HttpOnly para o access token (validade máxima de 10
+minutos) e refresh token. O corpo de login não expõe os tokens. Navegadores
+devem enviar as requisições com `credentials: "include"`; o refresh é rotativo,
+controlado pelo servidor e o logout revoga imediatamente a sessão.
+
+Execute `src/database/migrations/014_sessoes_autenticacao.sql` para criar os
+índices usados na validação das sessões. Em produção, configure
+`CORS_ALLOWED_ORIGINS` com as origens exatas do frontend e use HTTPS com
+`AUTH_COOKIE_SECURE=true`. Requisições que alteram dados e enviam cookies devem
+conter uma origem permitida.
+
+Clientes não-browser ainda podem enviar um access token no header:
 
 ```bash
 curl http://localhost:8000/api/auth/me \
@@ -196,6 +210,10 @@ curl -X POST http://localhost:8000/api/auth/refresh \
     "refresh_token": "SEU_REFRESH_TOKEN"
   }'
 ```
+
+Para navegador, envie o cookie HttpOnly em vez de ler o token e inclua a
+origem permitida. O endpoint rotaciona os cookies e não devolve os tokens no
+corpo.
 
 ## 7. Logout
 
@@ -263,7 +281,24 @@ curl -X PATCH http://localhost:8000/api/usuarios/eu/senha \
   }'
 ```
 
-## 9. Relatórios
+## 9. Calendário
+
+Execute `src/database/migrations/013_calendario_compartilhado.sql` para habilitar
+eventos compartilhados e seus dados de visibilidade no calendário.
+
+- `GET /api/calendario/eventos` lista somente eventos pessoais do usuário, do
+  setor ao qual pertence e da empresa.
+- `GET /api/calendario/setores` lista os setores da empresa do usuário.
+- `POST /api/calendario/eventos` cria eventos pessoais para colaboradores,
+  pessoais ou do próprio setor para supervisores, e pessoais, por setor ou
+  para toda a empresa para administradores. O corpo usa `titulo`, `data`
+  (`YYYY-MM-DD`), `horario` (`HH:mm`), `categoria` e `escopo`
+  (`PESSOAL`, `SETOR` ou `EMPRESA`). Para administradores, eventos de setor
+  também exigem `id_setor`.
+- `DELETE /api/calendario/eventos/:id` remove apenas eventos criados pelo
+  próprio usuário.
+
+## 10. Relatórios
 
 ### GET /api/relatorios
 
@@ -286,7 +321,7 @@ curl -X POST http://localhost:8000/api/relatorios \
   }'
 ```
 
-## 10. Códigos de status esperados
+## 11. Códigos de status esperados
 
 - 200: sucesso
 - 201: criação bem-sucedida
@@ -296,7 +331,7 @@ curl -X POST http://localhost:8000/api/relatorios \
 - 404: recurso não encontrado
 - 500: erro interno
 
-## 11. Checklist de testes iniciais
+## 12. Checklist de testes iniciais
 
 1. Iniciar a API na porta 8000
 2. Verificar /health
@@ -309,12 +344,12 @@ curl -X POST http://localhost:8000/api/relatorios \
 9. Gerar relatório em JSON
 10. Gerar relatório em CSV
 
-## 12. Usuário admin de teste
+## 13. Usuário admin de teste
 
 - email: souzaluis.dev@gmail.com
 - senha: 02132027
 
-## 13. Observações
+## 14. Observações
 
 - A autenticação exige JWT no header `Authorization`.
 - A API usa a porta 8000 localmente.
