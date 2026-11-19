@@ -84,18 +84,17 @@ export async function downloadTrainingPdf(reference: string): Promise<Buffer> {
             fileId: googleDriveFileId(reference),
             alt: "media",
             supportsAllDrives: true,
-        });
+        }, { responseType: "stream" });
 
-        if (result.data instanceof Buffer) return result.data;
-        if (result.data instanceof ArrayBuffer) return Buffer.from(result.data);
-        if (result.data instanceof Uint8Array) return Buffer.from(result.data);
-        if (result.data && typeof (result.data as NodeJS.ReadableStream)[Symbol.asyncIterator] === "function") {
-            return streamToBuffer(result.data as NodeJS.ReadableStream);
-        }
-        return Buffer.from(result.data as ArrayBuffer);
+        return await streamToBuffer(result.data);
     } catch (error) {
         if (error instanceof AppError) throw error;
-        throw new AppError("O PDF não está disponível no Google Drive.", 404);
+        const status = (error as { code?: number; response?: { status?: number } })?.response?.status
+            ?? (error as { code?: number })?.code;
+        if (status === 404) {
+            throw new AppError("O PDF não está disponível no Google Drive.", 404);
+        }
+        throw new AppError("Não foi possível baixar o PDF do Google Drive.", 502);
     }
 }
 

@@ -124,6 +124,9 @@ Antes de usar os campos de apresentação da empresa, execute a migration
 Execute `src/database/migrations/007_recrutamento.sql` em ambientes que ainda
 não tenham as tabelas `vaga`, `candidato` e `candidatura`. A migration usa
 `CREATE TABLE IF NOT EXISTS` e preserva essas tabelas quando já existem.
+Em bancos legados nos quais `candidatura` ainda usa `id_usuario`, execute
+também `src/database/migrations/015_recrutamento_candidatos.sql` para criar
+`candidato`, migrar os dados e associar cada candidatura ao novo cadastro.
 
 As rotas administrativas usam o `id_empresa` do usuário autenticado, sem aceitar
 empresa enviada pelo cliente. Consultas e alterações ficam limitadas à empresa
