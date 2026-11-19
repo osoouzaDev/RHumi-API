@@ -1,359 +1,498 @@
-# RHumi API - Guia de Teste
+# RHumi API
 
-## 1. Informações gerais
+<div align="center">
 
-- API: RHumi API
-- Porta local: 8000
-- Base URL: http://localhost:8000
-- Tecnologia: Node.js + TypeScript + Express
-- Banco: PostgreSQL
+**Backend de gestão de recursos humanos e desenvolvimento organizacional**
 
-## 2. Como iniciar a aplicação
+[![Node.js](https://img.shields.io/badge/Node.js-22+-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-7+-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Express](https://img.shields.io/badge/Express-5-000000?logo=express&logoColor=white)](https://expressjs.com/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16+-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
+[![License](https://img.shields.io/badge/license-ISC-blue.svg)](https://opensource.org/license/isc-license-txt)
 
-No terminal do projeto, execute:
+API REST responsável por autenticação, gestão de colaboradores, empresas, jornadas,
+recrutamento, treinamentos, calendário e relatórios do ecossistema RHumi.
+
+</div>
+
+---
+
+## Visão geral
+
+O RHumi centraliza os processos estratégicos e operacionais de RH em uma única API:
+
+| Área | Recursos |
+|---|---|
+| **Identidade e acesso** | Login por e-mail/senha ou código, perfil autenticado, refresh rotativo e logout |
+| **Colaboradores** | Cadastro, consulta, atualização, senhas, setores, cargos e contratos |
+| **Organização** | Dados da empresa, setores, classificações e contexto empresarial |
+| **Jornadas** | Etapas de integração/desenvolvimento e acompanhamento de tarefas |
+| **Recrutamento** | Vagas públicas e internas, candidatos e etapas de candidatura |
+| **Aprendizagem** | Treinamentos, avaliações, provas, PDFs e histórico de desempenho |
+| **Calendário** | Eventos pessoais, por setor e compartilhados pela empresa |
+| **Gestão** | Catálogo e emissão de relatórios em JSON ou CSV |
+
+## Funcionalidades
+
+- Sessões HTTP seguras com access token e refresh token em cookies `HttpOnly`
+- Autenticação complementar por header `Authorization: Bearer`
+- Controle de acesso por perfil: colaborador, gestor, administrador e superadministrador
+- Validação de parâmetros, consulta e corpo das requisições com Zod
+- Pool de conexões PostgreSQL com suporte a SSL, CA customizada e banco gerenciado
+- Proteção por Helmet, CORS explícito, CSRF para requisições autenticadas por cookie,
+  limite global de requisições e tamanho máximo de body
+- Health check público com estado da aplicação e da conexão PostgreSQL
+- Anexos de treinamento enviados ao Google Drive ou armazenados localmente
+- Respostas de avaliações corrigidas no servidor e snapshots históricos de conteúdo
+- Rotas públicas isoladas para vagas e dados necessários ao site de carreiras
+
+---
+
+## Arquitetura
+
+A aplicação usa uma arquitetura em camadas por domínio funcional:
+
+```text
+src/
+├── app.ts                 Montagem dos middlewares e routers
+├── server.ts              Inicialização HTTP e ciclo de vida do processo
+├── config/                Ambiente, CORS, rate limit e logger
+├── database/              Pool PostgreSQL e migrations
+├── middlewares/           Autenticação, RBAC, CSRF e tratamento de erros
+├── modules/               Controllers, DTOs, serviços e repositórios
+│   ├── auth/
+│   ├── calendar/
+│   ├── company/
+│   ├── health/
+│   ├── journeys/
+│   ├── learning/
+│   ├── recruitment/
+│   ├── reports/
+│   └── users/
+├── routes/                Definição pública das rotas HTTP
+├── shared/                Erros e formatos de resposta
+└── utils/                 Utilidades compartilhadas
+```
+
+Cada módulo concentra as regras do seu domínio, separando transporte HTTP,
+validação, aplicação e persistência.
+
+---
+
+## Tecnologias
+
+- **Runtime:** Node.js
+- **Linguagem:** TypeScript
+- **Framework HTTP:** Express 5
+- **Banco de dados:** PostgreSQL com `pg`
+- **Validação:** Zod
+- **Autenticação:** JWT em cookies HttpOnly
+- **Segurança:** Helmet, CORS, rate limit e proteção CSRF
+- **Integração:** Google Drive API
+- **Uploads:** Multer
+- **Logs:** Pino
+- **Testes:** Node Test Runner via `tsx`
+
+---
+
+## Pré-requisitos
+
+- Node.js 22 ou superior
+- npm
+- PostgreSQL 13 ou superior
+- Acesso a um banco PostgreSQL criado para o RHumi
+
+---
+
+## Configuração
+
+### 1. Instalar dependências
 
 ```bash
 npm install
+```
+
+### 2. Criar o arquivo de ambiente
+
+```bash
+cp .env.example .env
+```
+
+No PowerShell, use:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+### 3. Configurar variáveis essenciais
+
+```dotenv
+NODE_ENV=development
+PORT=3333
+CORS_ALLOWED_ORIGINS=http://localhost:4200
+
+JWT_SECRET=uma-chave-longa-de-pelo-menos-32-caracteres
+PASSWORD_PEPPER=um-pepper-longo-de-pelo-menos-32-caracteres
+JWT_ISSUER=rhumi-api
+JWT_AUDIENCE=rhumi-web
+
+DATABASE_URL=postgresql://usuario:senha@host:5432/rhumi
+DATABASE_SSL=true
+DATABASE_SSL_REJECT_UNAUTHORIZED=true
+DATABASE_POOL_MAX=10
+
+DEFAULT_EMPRESA_ID=uuid-da-empresa
+```
+
+> `JWT_SECRET`, `PASSWORD_PEPPER`, `JWT_ISSUER` e `JWT_AUDIENCE` são obrigatórios.
+> Gere valores reais e não reutilize exemplos em ambientes compartilhados.
+
+O banco também pode ser configurado por parâmetros separados:
+
+```dotenv
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=rhumi
+DB_USER=postgres
+DB_PASSWORD=senha
+```
+
+Quando `DATABASE_URL` estiver definida, ela tem prioridade sobre os parâmetros separados.
+
+### Variáveis disponíveis
+
+| Variável | Descrição | Padrão |
+|---|---|---|
+| `PORT` | Porta HTTP | `8000` |
+| `NODE_ENV` | Ambiente da aplicação | `development` |
+| `CORS_ALLOWED_ORIGINS` | Origens separadas por vírgula | — |
+| `LOG_LEVEL` | Nível de log Pino | `info` |
+| `JWT_SECRET` | Chave para assinatura dos JWT | Obrigatória |
+| `PASSWORD_PEPPER` | Pepper aplicado ao armazenamento de senhas | Obrigatório |
+| `JWT_ISSUER` | Emissor esperado nos tokens | Obrigatório |
+| `JWT_AUDIENCE` | Audiência esperada nos tokens | Obrigatório |
+| `ACCESS_TOKEN_TTL_SECONDS` | Validade do access token, máximo 600 segundos | `600` |
+| `REFRESH_TOKEN_TTL_DAYS` | Validade do refresh token | `30` |
+| `REFRESH_TOKEN_COOKIE_MAX_AGE_SEC` | Validade específica do cookie de refresh | Derivado do TTL |
+| `AUTH_COOKIE_SECURE` | Envia cookies apenas por HTTPS | `true` em produção |
+| `AUTH_COOKIE_SAME_SITE` | Política SameSite: `lax`, `strict` ou `none` | `lax` local, `none` produção |
+| `AUTH_COOKIE_DOMAIN` | Domínio opcional dos cookies | — |
+| `ACCESS_TOKEN_COOKIE_NAME` | Nome do cookie de access token | `access_token` |
+| `REFRESH_TOKEN_COOKIE_NAME` | Nome do cookie de refresh token | `refresh_token` |
+| `DATABASE_URL` | URI completa do PostgreSQL | — |
+| `DATABASE_SSL` | Habilita SSL PostgreSQL | `false` |
+| `DATABASE_SSL_REJECT_UNAUTHORIZED` | Valida certificado do servidor | `true` |
+| `DATABASE_CA_PATH` | Caminho da CA personalizada | — |
+| `DB_SSL_CA_PEM` | Conteúdo PEM da CA personalizado | — |
+| `DATABASE_POOL_MAX` | Máximo de conexões no pool | `10` |
+| `DEFAULT_EMPRESA_ID` | UUID da empresa usada em áreas públicas e contextos compartilhados | Obrigatório em módulos dependentes |
+| `TRAINING_PDF_DIR` | Diretório persistente dos PDFs locais | `./storage/training-pdfs` |
+
+---
+
+## Banco de dados e migrations
+
+Todas as migrations estão em `src/database/migrations/`.
+
+Aplique-as em ordem numérica no PostgreSQL:
+
+```text
+001_rhumi_core_schema.sql
+002_codigo_colaborador_usuario.sql
+003_colaborador_tipo_contrato_opcional.sql
+004_administrador_e_setores_empresa.sql
+005_superadministrador_sakai.sql
+006_dados_publicos_empresa.sql
+007_jornadas_recrutamento.sql
+007_recrutamento.sql
+008_codigo_colaborador_opcional_candidato.sql
+009_treinamentos_avaliacoes.sql
+010_prova_treinamento.sql
+011_exclusao_cascade_resultados.sql
+012_nome_arquivo_pdf.sql
+013_calendario_compartilhado.sql
+014_sessoes_autenticacao.sql
+015_recrutamento_candidatos.sql
+```
+
+As migrations posteriores possuem `IF NOT EXISTS` ou verificações de compatibilidade
+sempre que isso é necessário para preservar dados existentes. Antes de iniciar,
+registre a empresa alvo em `public.empresa` e informe seu UUID em `DEFAULT_EMPRESA_ID`.
+
+### Google Drive para PDFs
+
+A integração usa OAuth por refresh token. Configure:
+
+```dotenv
+GOOGLE_DRIVE_TRAINING_FOLDER_ID=
+GOOGLE_DRIVE_OAUTH_CLIENT_ID=
+GOOGLE_DRIVE_OAUTH_CLIENT_SECRET=
+GOOGLE_DRIVE_OAUTH_REFRESH_TOKEN=
+GOOGLE_DRIVE_OAUTH_REDIRECT_URI=http://localhost:3001/oauth2/callback
+```
+
+Autorize a conta executando:
+
+```bash
+npm run authorize:google-drive
+```
+
+Sem a integração completa, os PDFs continuam disponíveis no diretório configurado
+por `TRAINING_PDF_DIR` ou no diretório padrão `./storage/training-pdfs`.
+
+---
+
+## Executando
+
+### Desenvolvimento
+
+```bash
 npm run dev
 ```
 
-A API ficará disponível em:
+Por padrão com o `.env.example`, a API atende em:
 
 ```text
-http://localhost:8000
+http://localhost:3333
 ```
 
-## 3. Health check
-
-### GET /health
+### Build de produção
 
 ```bash
-curl http://localhost:8000/health
+npm run build
+npm start
 ```
 
-Resposta esperada:
+O build gera JavaScript em `dist/`. A inicialização de produção executa
+`dist/server.js`.
 
-```json
-{
-  "success": true,
-  "data": {
-    "status": "ok"
-  }
-}
-```
-
-### GET /api/health
+### Verificação de tipos
 
 ```bash
-curl http://localhost:8000/api/health
+npm run typecheck
 ```
 
-## 4. Login
+---
 
-### POST /api/auth/login
+## Rotas da API
+
+Todas as respostas seguem um formato consistente e são validadas antes dos
+controllers processarem os dados.
+
+### Monitoramento
+
+| Método | Rota | Acesso | Descrição |
+|---|---|---|---|
+| `GET` | `/health` | Público | Health check legado |
+| `GET` | `/api/health` | Público | Health check completo da API e banco |
+
+O banco indisponível retorna **503** com `status: "degraded"`.
+
+### Autenticação e sessão
+
+| Método | Rota | Acesso | Descrição |
+|---|---|---|---|
+| `POST` | `/api/auth/login` | Público | Login por e-mail/senha ou código do colaborador |
+| `POST` | `/api/auth/login/codigo` | Público | Login direto por código |
+| `POST` | `/api/auth/refresh` | Público | Rotação do refresh token |
+| `POST` | `/api/auth/logout` | Público | Encerramento e revogação da sessão |
+| `GET` | `/api/auth/me` | Autenticado | Dados do usuário autenticado |
+
+### Usuários e setores
+
+| Método | Rota | Acesso | Descrição |
+|---|---|---|---|
+| `GET` | `/api/setores` | Autenticado | Lista setores disponíveis |
+| `GET` | `/api/usuarios` | Autenticado | Lista usuários com filtros e paginação |
+| `GET` | `/api/usuarios/:id` | Autenticado | Consulta usuário por ID |
+| `POST` | `/api/usuarios` | Admin | Cria colaborador |
+| `PUT` | `/api/usuarios/:id` | Admin ou próprio usuário | Atualização parcial dos dados |
+| `PATCH` | `/api/usuarios/:id/senha` | Admin | Altera senha de usuário |
+| `PATCH` | `/api/usuarios/:id/reset-senha` | Admin | Redefine senha diretamente |
+| `PATCH` | `/api/usuarios/eu/senha` | Autenticado | Altera a própria senha |
+| `DELETE` | `/api/usuarios/:id` | Admin | Remove usuário |
+
+### Empresa
+
+| Método | Rota | Acesso | Descrição |
+|---|---|---|---|
+| `GET` | `/api/empresa` | Autenticado | Dados da empresa |
+| `PUT` | `/api/empresa` | Admin | Atualiza dados corporativos |
+| `POST` | `/api/empresa/setores` | Admin | Adiciona setor |
+| `DELETE` | `/api/empresa/setores/:id` | Admin | Remove setor vazio |
+
+### Jornadas
+
+| Método | Rota | Acesso | Descrição |
+|---|---|---|---|
+| `GET` | `/api/jornadas` | Autenticado | Lista jornadas e tarefas |
+| `PATCH` | `/api/jornadas/:usuarioId/etapas/:etapaKey/tarefas/:tarefaKey` | Admin | Atualiza tarefa da jornada |
+| `DELETE` | `/api/jornadas/:usuarioId/etapas/:etapaKey` | Admin | Reabre uma etapa |
+
+### Recrutamento
+
+| Método | Rota | Acesso | Descrição |
+|---|---|---|---|
+| `GET` | `/api/public/vagas` | Público | Lista vagas abertas |
+| `GET` | `/api/recrutamento/vagas` | Autenticado | Lista vagas da empresa |
+| `POST` | `/api/recrutamento/vagas` | Admin | Cadastra vaga |
+| `PATCH` | `/api/recrutamento/vagas/:id/status` | Admin | Pausa ou reabre vaga |
+| `GET` | `/api/recrutamento/candidaturas` | Autenticado | Lista candidaturas |
+| `POST` | `/api/recrutamento/candidaturas` | Admin | Cadastra candidatura |
+| `PATCH` | `/api/recrutamento/candidaturas/:id/status` | Admin | Atualiza etapa da candidatura |
+
+### Capacitações
+
+| Método | Rota | Acesso | Descrição |
+|---|---|---|---|
+| `GET` | `/api/capacitacoes` | Autenticado | Lista treinamentos conforme perfil e setor |
+| `POST` | `/api/capacitacoes` | Admin | Cria treinamento ou avaliação |
+| `PUT` | `/api/capacitacoes/:id` | Admin | Atualiza conteúdo |
+| `PATCH` | `/api/capacitacoes/:id/status` | Admin | Ativa ou desativa conteúdo |
+| `DELETE` | `/api/capacitacoes/:id` | Admin | Exclui conteúdo |
+| `GET` | `/api/capacitacoes/desempenho` | Admin | Consolida resultados |
+| `GET` | `/api/capacitacoes/:id/resultados` | Admin | Consulta tentativas |
+| `GET` | `/api/capacitacoes/:id/pdf` | Autenticado | Visualiza PDF autorizado |
+| `POST` | `/api/capacitacoes/:id/respostas` | Autenticado | Envia respostas da avaliação |
+
+Para anexar PDF, envie `pdf` em `multipart/form-data`.
+O limite configurado é de 10 MiB.
+
+### Calendário
+
+| Método | Rota | Acesso | Descrição |
+|---|---|---|---|
+| `GET` | `/api/calendario/setores` | Autenticado | Lista setores visíveis |
+| `GET` | `/api/calendario/eventos` | Autenticado | Lista eventos autorizados |
+| `POST` | `/api/calendario/eventos` | Autenticado | Cria evento pessoal, de setor ou empresa |
+| `DELETE` | `/api/calendario/eventos/:id` | Autenticado | Exclui evento criado pelo usuário |
+
+### Relatórios
+
+| Método | Rota | Acesso | Descrição |
+|---|---|---|---|
+| `GET` | `/api/relatorios` | Autenticado | Lista relatórios disponíveis |
+| `POST` | `/api/relatorios` | Admin | Gera relatório em JSON ou CSV |
+
+---
+
+## Autenticação no navegador
+
+Durante o login, a API entrega os tokens em cookies `HttpOnly`. O JavaScript
+do frontend não deve tentar ler ou armazenar esses valores.
+
+```javascript
+const response = await fetch("http://localhost:3333/api/auth/me", {
+  credentials: "include",
+});
+
+const data = await response.json();
+```
+
+No ambiente local mantenha:
+
+```dotenv
+AUTH_COOKIE_SECURE=false
+AUTH_COOKIE_SAME_SITE=lax
+```
+
+Em produção com HTTPS e frontend em domínio diferente:
+
+```dotenv
+AUTH_COOKIE_SECURE=true
+AUTH_COOKIE_SAME_SITE=none
+CORS_ALLOWED_ORIGINS=https://app.exemplo.com
+```
+
+Requisições que alteram dados e usam cookies devem possuir uma origem presente
+em `CORS_ALLOWED_ORIGINS`.
+
+Clientes que não usam navegador podem enviar o access token no header:
 
 ```bash
-curl -X POST http://localhost:8000/api/auth/login \
+curl "http://localhost:3333/api/auth/me" \
+  -H "Authorization: Bearer SEU_ACCESS_TOKEN"
+```
+
+---
+
+## Exemplo de login
+
+### E-mail e senha
+
+```bash
+curl -X POST "http://localhost:3333/api/auth/login" \
   -H "Content-Type: application/json" \
   -d '{
-    "login": "souzaluis.dev@gmail.com",
-    "senha": "02132027"
+    "email": "administrador@empresa.com",
+    "senha": "SENHA_FORTE"
   }'
 ```
 
-Resposta esperada:
+O mesmo endpoint aceita o campo `login` no lugar de `email`.
 
-```json
-{
-  "success": true,
-  "data": {
-    "token_type": "Bearer",
-    "expires_in": 600
-  }
-}
-```
-
-Os tokens são enviados somente em cookies `HttpOnly`; o corpo não expõe
-credenciais de sessão. O navegador deve usar `credentials: "include"` nas
-requisições à API. O access token expira em até 10 minutos e o refresh token é
-rotacionado no servidor.
-
-### Entrar com código do colaborador
-
-O campo `codigo_colaborador` recebe uma string de exatamente quatro dígitos,
-incluindo zeros à esquerda quando houver:
+### Código do colaborador
 
 ```bash
-curl -X POST http://localhost:8000/api/auth/login \
+curl -X POST "http://localhost:3333/api/auth/login/codigo" \
   -H "Content-Type: application/json" \
   -d '{
     "codigo_colaborador": "0042"
   }'
 ```
 
-O código é gerado automaticamente para cada usuário criado e é incluído na
-resposta de `POST /api/usuarios`. Execute a migration
-`src/database/migrations/002_codigo_colaborador_usuario.sql` antes de usar o
-novo formato de login. Os códigos existentes também são preenchidos pela migration.
-O intervalo disponível é de `0000` a `9999`; códigos emitidos não são reutilizados,
-inclusive após a exclusão de um usuário.
+O código possui exatamente quatro dígitos e inclui zeros à esquerda.
 
-## Atualizar cadastro de colaborador
+---
 
-O endpoint `PUT /api/usuarios/:id` atualiza parcialmente os dados da conta e do
-perfil profissional. Além de nome, e-mail, classificação e status, aceita
-`telefone`, `setor`, `cargo`, `tipo_contrato`, `data_admissao` (formato
-`AAAA-MM-DD`) e `descricao_cargo`. Para remover um dado opcional, envie `null`.
+## Scripts disponíveis
 
-Antes de permitir perfis sem tipo de contrato informado, execute a migration
-`src/database/migrations/003_colaborador_tipo_contrato_opcional.sql`.
+| Comando | Finalidade |
+|---|---|
+| `npm run dev` | Servidor em modo watch |
+| `npm run build` | Compila TypeScript para `dist/` |
+| `npm start` | Executa a versão compilada |
+| `npm run typecheck` | Verifica tipos sem gerar arquivos |
+| `npm test` | Executa o teste de autenticação |
+| `npm run test:learning` | Executa testes do módulo de aprendizagem |
+| `npm run test:google-drive` | Testa a integração com Google Drive |
+| `npm run authorize:google-drive` | Inicia a autorização OAuth do Google Drive |
 
-## Dados da empresa
+---
 
-Antes de usar os campos de apresentação da empresa, execute a migration
-`src/database/migrations/006_dados_publicos_empresa.sql`. Configure
-`DEFAULT_EMPRESA_ID` com o UUID da empresa que a API deve gerenciar.
+## Códigos HTTP
 
-- `GET /api/empresa`: retorna os dados cadastrais, setores, quantidade de colaboradores e classificações da empresa autenticada.
-- `PUT /api/empresa`: atualiza os dados cadastrais, a página de carreiras e a cultura organizacional; requer perfil administrador.
-- `POST /api/empresa/setores`: adiciona um setor; requer perfil administrador.
-- `DELETE /api/empresa/setores/:id`: remove um setor sem colaboradores vinculados; requer perfil administrador.
+| Código | Significado |
+|---|---|
+| `200` | Requisição concluída com sucesso |
+| `201` | Recurso criado |
+| `400` | Corpo ou parâmetros inválidos |
+| `401` | Sessão ausente, inválida ou expirada |
+| `403` | Usuário autenticado sem autorização |
+| `404` | Recurso não encontrado |
+| `429` | Limite global de requisições excedido |
+| `503` | Serviço indisponível ou banco degradado |
+| `500` | Erro interno não tratado |
 
-## Recrutamento
+---
 
-Execute `src/database/migrations/007_recrutamento.sql` em ambientes que ainda
-não tenham as tabelas `vaga`, `candidato` e `candidatura`. A migration usa
-`CREATE TABLE IF NOT EXISTS` e preserva essas tabelas quando já existem.
-Em bancos legados nos quais `candidatura` ainda usa `id_usuario`, execute
-também `src/database/migrations/015_recrutamento_candidatos.sql` para criar
-`candidato`, migrar os dados e associar cada candidatura ao novo cadastro.
+## Segurança
 
-As rotas administrativas usam o `id_empresa` do usuário autenticado, sem aceitar
-empresa enviada pelo cliente. Consultas e alterações ficam limitadas à empresa
-desse usuário; criação e atualização exigem perfil administrador. A rota pública
-usa `DEFAULT_EMPRESA_ID` e retorna somente vagas abertas.
+- Não versione arquivos `.env`, credenciais ou certificados privados
+- Use secrets aleatórios com pelo menos 32 caracteres
+- Mantenha `NODE_ENV=production` e HTTPS em produção
+- Restrinja `CORS_ALLOWED_ORIGINS` aos domínios reais do frontend
+- Habilite `AUTH_COOKIE_SECURE=true` fora de ambientes locais
+- Não exponha tokens no corpo das respostas de login
+- Preserve os dados sensíveis no servidor e aplique RBAC em todas as operações
+- Revogue refresh tokens e faça logout após alterações críticas de senha
 
-- `GET /api/public/vagas`: lista vagas abertas para o site de carreiras, sem autenticação.
-- `GET /api/recrutamento/vagas` e `POST /api/recrutamento/vagas`: consultar e cadastrar vagas.
-- `PATCH /api/recrutamento/vagas/:id/status`: pausar ou reabrir uma vaga.
-- `GET /api/recrutamento/candidaturas` e `POST /api/recrutamento/candidaturas`: listar candidaturas e associar um candidato a uma vaga aberta.
-- `PATCH /api/recrutamento/candidaturas/:id/status`: atualizar a etapa da candidatura.
+---
 
-Os tipos de contrato e etapas aceitos correspondem aos valores definidos nas
-restrições das tabelas de recrutamento. O cadastro de candidato grava/atualiza
-seus dados em `candidato` e cria a relação com a vaga em `candidatura`.
+## Contribuindo
 
-## Treinamentos e avaliações
-
-Execute `src/database/migrations/009_treinamentos_avaliacoes.sql` depois da
-migration inicial e `src/database/migrations/010_prova_treinamento.sql` para
-habilitar a prova opcional associada ao treinamento. Execute também
-`src/database/migrations/011_exclusao_cascade_resultados.sql` para permitir a
-exclusão confirmada de conteúdos com resultados vinculados. A migration 009
-preserva os treinamentos existentes e associa os setores já cadastrados.
-Configure `DEFAULT_EMPRESA_ID`.
-
-Anexos PDF são limitados a 10 MiB e armazenados fora de uma rota pública. Para
-usar o Google Drive, habilite a Drive API no projeto, crie uma conta de serviço,
-compartilhe a pasta com o e-mail da conta de serviço e configure
-`GOOGLE_DRIVE_TRAINING_FOLDER_ID`. Forneça as credenciais por
-`GOOGLE_APPLICATION_CREDENTIALS`, `GOOGLE_DRIVE_SERVICE_ACCOUNT_FILE` ou
-`GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON`. PDFs novos serão gravados na pasta do Drive;
-PDFs locais anteriores continuam disponíveis como compatibilidade temporária.
-
-Sem a integração do Google Drive, o padrão local é `./storage/training-pdfs`;
-configure `TRAINING_PDF_DIR` para apontar para um volume persistente.
-
-- `GET /api/capacitacoes`: lista conteúdos de gerenciamento para administradores; para colaboradores, retorna somente conteúdos ativos destinados ao setor atual e omite as respostas corretas.
-- `POST /api/capacitacoes` e `PUT /api/capacitacoes/:id`: criam e editam treinamentos/avaliações; requer perfil administrador. Para PDF anexado, envie o campo `pdf` em `multipart/form-data`.
-- `PATCH /api/capacitacoes/:id/status`: ativa ou desativa um conteúdo; requer perfil administrador.
-- `DELETE /api/capacitacoes/:id`: exclui o conteúdo e, quando `apagar_resultados: true` for explicitamente confirmado, também remove permanentemente suas tentativas e resultados.
-- `GET /api/capacitacoes/:id/pdf`: visualiza o anexo após validar empresa e destino setorial.
-- `GET /api/capacitacoes/:id/resultados`: consulta o histórico de tentativas; requer perfil administrador.
-- `GET /api/capacitacoes/desempenho`: consolida médias e tentativas de avaliações e provas de treinamento por colaborador ativo; requer perfil administrador.
-- `POST /api/capacitacoes/:id/respostas`: recebe a avaliação do colaborador autenticado, corrige no servidor e retorna a quantidade de acertos.
-
-Cada avaliação permite uma tentativa por colaborador. A pontuação é a contagem
-de respostas corretas; perguntas, alternativas, respostas e resultados enviados
-são preservados em um snapshot histórico quando o conteúdo é editado. A prova
-opcional do treinamento usa nota mínima configurável (padrão de 70%); o limiar
-e a aprovação ficam registrados junto com cada tentativa.
-O desempenho contabiliza avaliações respondidas e provas vinculadas a
-treinamentos; a visualização de um treinamento sem prova não gera pontuação
-nem registro de conclusão.
-
-## 5. Sessões por cookies HttpOnly
-
-A API define cookies HttpOnly para o access token (validade máxima de 10
-minutos) e refresh token. O corpo de login não expõe os tokens. Navegadores
-devem enviar as requisições com `credentials: "include"`; o refresh é rotativo,
-controlado pelo servidor e o logout revoga imediatamente a sessão.
-
-Execute `src/database/migrations/014_sessoes_autenticacao.sql` para criar os
-índices usados na validação das sessões. Em produção, configure
-`CORS_ALLOWED_ORIGINS` com as origens exatas do frontend e use HTTPS com
-`AUTH_COOKIE_SECURE=true`. Requisições que alteram dados e enviam cookies devem
-conter uma origem permitida.
-
-Clientes não-browser ainda podem enviar um access token no header:
-
-```bash
-curl http://localhost:8000/api/auth/me \
-  -H "Authorization: Bearer SEU_ACCESS_TOKEN"
-```
-
-## 6. Refresh token
-
-### POST /api/auth/refresh
-
-```bash
-curl -X POST http://localhost:8000/api/auth/refresh \
-  -H "Content-Type: application/json" \
-  -d '{
-    "refresh_token": "SEU_REFRESH_TOKEN"
-  }'
-```
-
-Para navegador, envie o cookie HttpOnly em vez de ler o token e inclua a
-origem permitida. O endpoint rotaciona os cookies e não devolve os tokens no
-corpo.
-
-## 7. Logout
-
-### POST /api/auth/logout
-
-```bash
-curl -X POST http://localhost:8000/api/auth/logout \
-  -H "Authorization: Bearer SEU_ACCESS_TOKEN"
-```
-
-## 8. Usuários
-
-### GET /api/usuarios
-
-```bash
-curl http://localhost:8000/api/usuarios \
-  -H "Authorization: Bearer SEU_ACCESS_TOKEN"
-```
-
-### GET /api/usuarios/:id
-
-```bash
-curl http://localhost:8000/api/usuarios/1 \
-  -H "Authorization: Bearer SEU_ACCESS_TOKEN"
-```
-
-### POST /api/usuarios
-
-```bash
-curl -X POST http://localhost:8000/api/usuarios \
-  -H "Authorization: Bearer SEU_ACCESS_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "login": "joao.silva",
-    "nome": "João Silva",
-    "email": "joao@empresa.com",
-    "senha": "MinhaSenha123",
-    "classificacao": "usuario",
-    "ativo": true
-  }'
-```
-
-### PUT /api/usuarios/:id
-
-```bash
-curl -X PUT http://localhost:8000/api/usuarios/1 \
-  -H "Authorization: Bearer SEU_ACCESS_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "nome": "João da Silva",
-    "email": "joao.novo@empresa.com",
-    "ativo": true
-  }'
-```
-
-### PATCH /api/usuarios/eu/senha
-
-```bash
-curl -X PATCH http://localhost:8000/api/usuarios/eu/senha \
-  -H "Authorization: Bearer SEU_ACCESS_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "senha_atual": "senhaAntiga123",
-    "nova_senha": "senhaNova456"
-  }'
-```
-
-## 9. Calendário
-
-Execute `src/database/migrations/013_calendario_compartilhado.sql` para habilitar
-eventos compartilhados e seus dados de visibilidade no calendário.
-
-- `GET /api/calendario/eventos` lista somente eventos pessoais do usuário, do
-  setor ao qual pertence e da empresa.
-- `GET /api/calendario/setores` lista os setores da empresa do usuário.
-- `POST /api/calendario/eventos` cria eventos pessoais para colaboradores,
-  pessoais ou do próprio setor para supervisores, e pessoais, por setor ou
-  para toda a empresa para administradores. O corpo usa `titulo`, `data`
-  (`YYYY-MM-DD`), `horario` (`HH:mm`), `categoria` e `escopo`
-  (`PESSOAL`, `SETOR` ou `EMPRESA`). Para administradores, eventos de setor
-  também exigem `id_setor`.
-- `DELETE /api/calendario/eventos/:id` remove apenas eventos criados pelo
-  próprio usuário.
-
-## 10. Relatórios
-
-### GET /api/relatorios
-
-```bash
-curl http://localhost:8000/api/relatorios \
-  -H "Authorization: Bearer SEU_ACCESS_TOKEN"
-```
-
-### POST /api/relatorios
-
-```bash
-curl -X POST http://localhost:8000/api/relatorios \
-  -H "Authorization: Bearer SEU_ACCESS_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "tipo": "usuarios-ativos",
-    "data_inicio": "2026-01-01",
-    "data_fim": "2026-12-31",
-    "formato": "json"
-  }'
-```
-
-## 11. Códigos de status esperados
-
-- 200: sucesso
-- 201: criação bem-sucedida
-- 400: dados inválidos
-- 401: token ausente/expirado ou credenciais inválidas
-- 403: usuário inativo ou sem permissão
-- 404: recurso não encontrado
-- 500: erro interno
-
-## 12. Checklist de testes iniciais
-
-1. Iniciar a API na porta 8000
-2. Verificar /health
-3. Fazer login com usuário admin
-4. Consultar /api/auth/me
-5. Testar refresh token
-6. Listar usuários
-7. Criar usuário
-8. Alterar senha própria
-9. Gerar relatório em JSON
-10. Gerar relatório em CSV
-
-## 13. Usuário admin de teste
-
-- email: souzaluis.dev@gmail.com
-- senha: 02132027
-
-## 14. Observações
-
-- A autenticação exige JWT no header `Authorization`.
-- A API usa a porta 8000 localmente.
-- Para testes de apresentação, priorize os endpoints de health, login, me, usuários e relatórios.
+1. Crie uma branch a partir da branch principal
+2. Faça alterações pequenas e testáveis
+3. Execute `npm run typecheck`
+4. Execute os testes relacionados
+5. Abra um Pull Request descrevendo a mudança e o impacto
